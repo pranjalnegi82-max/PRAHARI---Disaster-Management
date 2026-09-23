@@ -51,3 +51,13 @@
 | Posting-scoped civilian enrollment | IMPLEMENTED | Backend-enforced; retained from v9.4. |
 | Field Officer read-only alert view | IMPLEMENTED | Only issued/acknowledged posting-relevant advisories shown. |
 | Production identity/OIDC | DEFERRED | Recommended before agency deployment; prototype currently uses server-side API keys. |
+
+
+## Satellite Intelligence v9.7
+| Capability | Status | Notes |
+|---|---|---|
+| Live 14-channel satellite patch preparation | **Implemented / experimental** | Builds a 128×128×14 patch centered on a monitored PRAHARI location from Sentinel-2 L1C B1-B12 plus slope and DEM. Uses Earth Search STAC and a 10 m UTM-aligned grid. |
+| Benchmark terrain parity | **Partial** | Local ALOS slope + DEM can be configured. Without them, Copernicus DEM GLO-30 is used and slope is derived from the DEM; this is explicitly marked as a distribution-mismatched fallback. |
+| Live U-Net location inference | **Implemented / externally configured** | Admin API can prepare a live patch, run compatible Landslide4Sense weights, and polygonize candidate mask regions when PyTorch + weights are available. |
+| Candidate polygon review map | **Implemented** | Experimental candidate polygons can be overlaid in the Sentinel-2 workspace. They remain unreviewed evidence and cannot issue alerts automatically. |
+| Northeast India validation | **Deferred / required** | No operational accuracy claim is made until regional validation and error analysis are completed. |
