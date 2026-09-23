@@ -15,6 +15,7 @@ import os
 import uuid
 import csv
 import io
+import numpy as np
 from urllib.parse import urlencode
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import HTTPError, URLError
