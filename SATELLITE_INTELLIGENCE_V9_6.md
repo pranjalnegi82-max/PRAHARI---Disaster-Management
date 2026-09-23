@@ -65,3 +65,46 @@ PRAHARI GIS inventory
 ```
 
 Before enabling automatic masks in a public-warning workflow, evaluate the model on Northeast India scenes and document precision, recall, F1, false positives and common failure cases.
+
+
+## v9.7 implementation
+
+PRAHARI now contains a functional **live patch-preparation path** in `backend/satellite_preprocess.py`.
+
+### Model-scene input path
+
+The Landslide4Sense benchmark input includes Sentinel-2 **B1, B2, B3, B4, B5, B6, B7, B8, B9, B10, B11 and B12** and omits B8A. Earth Search Sentinel-2 L2A does not expose B10/cirrus as a normal L2A reflectance asset, so PRAHARI now deliberately separates:
+
+- **Sentinel-2 L2A** — scene review / before-after visual evidence.
+- **Sentinel-2 L1C** — experimental model-input preparation because B10 is available.
+
+For a selected monitored location, the preparation service:
+
+1. searches Earth Search for a recent cloud-screened Sentinel-2 L1C scene;
+2. creates a 128×128 grid at 10 m spacing in the local UTM CRS;
+3. resamples B1-B12 (excluding B8A) onto that grid;
+4. reads configured ALOS terrain rasters when available;
+5. otherwise reads Copernicus DEM GLO-30 and derives slope, explicitly marking the terrain source as a benchmark mismatch;
+6. stacks the result into a float32 128×128×14 patch;
+7. stores provenance, scene ID, acquisition time, cloud cover, raster asset links, CRS, transform, missing-data percentages and limitations.
+
+### APIs
+
+```
+GET  /api/satellite/preprocess/status
+POST /api/satellite/preprocess/{location_id}?confirm_experimental=true
+POST /api/satellite/model/infer-location/{location_id}?confirm_experimental=true
+```
+
+The location-inference API prepares the live patch, runs the optional Landslide4Sense-compatible U-Net adapter when configured, converts connected candidate mask regions into GeoJSON polygons, and returns them with a mandatory **UNREVIEWED** state.
+
+### Important model limitation
+
+This is a technically working research pipeline, but exact Landslide4Sense raw-scene preprocessing parity is **not established** from the public benchmark documentation. In particular:
+
+- the benchmark terrain channels were ALOS PALSAR slope and DEM;
+- PRAHARI's online fallback is Copernicus DEM unless local ALOS rasters are configured;
+- live Sentinel scaling is derived from STAC raster metadata;
+- the competition validation metrics cannot be transferred to Northeast India as an accuracy claim.
+
+Therefore PRAHARI labels live inference as **EXPERIMENTAL_MODEL_OUTPUT** and keeps human review between candidate polygons and any inventory/alert action.
