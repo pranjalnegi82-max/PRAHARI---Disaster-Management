@@ -26,3 +26,4 @@ __pycache__/
 backend/models/*.pth
 backend/models/*.pt
 backend/models/*.ckpt
+backend/satellite_patches/
