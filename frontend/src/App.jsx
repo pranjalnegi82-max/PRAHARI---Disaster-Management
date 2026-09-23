@@ -488,16 +488,121 @@ function Meta({label,value}) { return <div className="meta"><span>{label}</span>
 function Metric({label,value,unit}) { return <div className="metric"><span>{label}</span><strong>{value}<small>{unit}</small></strong></div>; }
 function Attention({count,label,action}) { return <button className="attention" onClick={action}><span className={count?'count count-hot':'count'}>{count}</span><span>{label}</span><span aria-hidden="true">→</span></button>; }
 
+function summarizeSentinelScene(item) {
+  const props=item?.properties||{};
+  const links=item?.links||[];
+  const link=(rel)=>links.find(x=>x.rel===rel && x.href)?.href||null;
+  const assets=item?.assets||{};
+  const asset=(...names)=>{for(const name of names){if(assets?.[name]?.href)return assets[name].href;}return null;};
+  return {
+    id:item?.id,
+    datetime:props.datetime,
+    cloud_cover_pct:props['eo:cloud_cover'],
+    platform:props.platform,
+    thumbnail_url:link('thumbnail'),
+    stac_url:link('self'),
+    bbox:item?.bbox,
+    assets:{visual:asset('visual'),red:asset('red','B04'),nir:asset('nir','nir08','B08'),swir16:asset('swir16','B11'),swir22:asset('swir22','B12'),scl:asset('scl','SCL')}
+  };
+}
+
+function chooseSentinelPair(scenes) {
+  const valid=(scenes||[]).filter(x=>x.datetime).sort((a,b)=>new Date(b.datetime)-new Date(a.datetime));
+  if(!valid.length)return null;
+  const recent=valid[0], rdt=new Date(recent.datetime);
+  const candidates=valid.slice(1).filter(x=>(rdt-new Date(x.datetime))/86400000>=10);
+  if(!candidates.length)return {recent,reference:null,days_between:null,status:'REFERENCE_SCENE_NOT_FOUND'};
+  candidates.sort((a,b)=>{
+    const ca=a.cloud_cover_pct??999, cb=b.cloud_cover_pct??999;
+    if(ca!==cb)return ca-cb;
+    return Math.abs((rdt-new Date(a.datetime))/86400000-30)-Math.abs((rdt-new Date(b.datetime))/86400000-30);
+  });
+  const reference=candidates[0];
+  return {recent,reference,days_between:Math.round((rdt-new Date(reference.datetime))/86400000),status:'PAIR_READY'};
+}
+
+async function browserSentinel2Search(location,{days=120,maxCloud=45,limit=12}={}) {
+  const end=new Date(), start=new Date(end.getTime()-days*86400000);
+  const pad=.15;
+  const body={
+    collections:['sentinel-2-l2a'],
+    bbox:[location.lon-pad,location.lat-pad,location.lon+pad,location.lat+pad],
+    datetime:`${start.toISOString()}/${end.toISOString()}`,
+    query:{'eo:cloud_cover':{lte:maxCloud}},
+    limit
+  };
+  const response=await fetch('https://earth-search.aws.element84.com/v1/search',{
+    method:'POST',headers:{'Content-Type':'application/json','Accept':'application/geo+json'},body:JSON.stringify(body)
+  });
+  if(!response.ok)throw new Error(`Earth Search returned ${response.status}`);
+  const raw=await response.json();
+  const scenes=(raw.features||[]).map(summarizeSentinelScene).sort((a,b)=>new Date(b.datetime)-new Date(a.datetime));
+  const pair=chooseSentinelPair(scenes);
+  return {
+    status:scenes.length?'AVAILABLE':'NO_SCENES',provider:'Element 84 Earth Search',collection:'sentinel-2-l2a',
+    location_id:location.id,location:`${location.name}, ${location.state}`,searched_at:Date.now()/1000,
+    search_days:days,max_cloud_pct:maxCloud,scene_count:scenes.length,scenes,pair,
+    analysis_status:pair?.status==='PAIR_READY'?'SCENE_PAIR_READY':'SCENE_DISCOVERY_ONLY',
+    segmentation_status:'MODEL_NOT_CONFIGURED',transport:'BROWSER_DIRECT_STAC',
+    note:'Real Sentinel-2 scene metadata fetched directly from Earth Search. Scene pairing is quality control, not a landslide detection result.'
+  };
+}
+
+function SatelliteSceneCard({scene,label}) {
+  if(!scene)return <div className="sat-scene-card sat-scene-empty"><strong>{label}</strong><span>No suitable scene found.</span></div>;
+  return <article className="sat-scene-card">
+    <div className="sat-scene-head"><div><span className="eyebrow">{label}</span><strong>{scene.datetime?new Date(scene.datetime).toLocaleDateString():'Unknown date'}</strong></div><Badge tone={(scene.cloud_cover_pct??100)<=20?'good':(scene.cloud_cover_pct??100)<=45?'warn':'neutral'}>{scene.cloud_cover_pct==null?'Cloud n/a':`${fmt(scene.cloud_cover_pct,0)}% cloud`}</Badge></div>
+    {scene.thumbnail_url?<img src={scene.thumbnail_url} alt={`Sentinel-2 ${label.toLowerCase()} scene`} loading="lazy"/>:<div className="sat-thumb-empty">Preview unavailable</div>}
+    <div className="sat-scene-meta"><span>{scene.platform||'Sentinel-2'}</span>{scene.stac_url&&<a href={scene.stac_url} target="_blank" rel="noreferrer">STAC metadata ↗</a>}</div>
+  </article>;
+}
+
+function SatelliteIntelligence({selected}) {
+  const [data,setData]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  async function load(){
+    if(!selected)return;
+    setBusy(true);setError('');
+    try{
+      let out=await get(`/api/satellite/sentinel2/${selected.id}?days=120&max_cloud=45&limit=12`);
+      if(out?.status==='SOURCE_UNAVAILABLE'){
+        try{out=await browserSentinel2Search(selected);}catch(browserError){throw new Error(`${out.error||'Satellite catalog unavailable'}; browser fallback: ${browserError.message}`);}
+      }
+      setData(out);
+    }catch(e){setError(e.message);setData(null);}finally{setBusy(false);}
+  }
+  useEffect(()=>{load();},[selected?.id]);
+  const pair=data?.pair;
+  return <section className="sat-intel">
+    <div className="sat-intel-head"><div><span className="eyebrow">Satellite intelligence · Sentinel-2 L2A</span><h2>Post-event scene review</h2><p>Real optical acquisitions are searched around {selected?selected.name:'the selected area'} and paired for before/after review.</p></div><button className="btn btn-secondary" onClick={load} disabled={busy}>{busy?'Searching…':'Refresh scenes'}</button></div>
+    {error&&<div className="notice notice-error"><strong>Satellite catalog unavailable.</strong><span>{error}</span></div>}
+    {!error&&busy&&!data&&<Loading/>}
+    {data&&<>
+      <div className="sat-status-row"><Badge tone={data.status==='AVAILABLE'?'good':'warn'}>{data.status}</Badge><span>{data.scene_count||0} scenes found</span><span>Cloud filter ≤ {fmt(data.max_cloud_pct,0)}%</span><span>{data.transport==='BROWSER_DIRECT_STAC'?'Browser-direct STAC':'Backend STAC'}</span></div>
+      {pair?.status==='PAIR_READY'?<div className="notice notice-warn"><strong>Scene pair ready for review.</strong><span>{pair.days_between} days separate the reference and recent acquisitions. This does not mean a landslide has been detected.</span></div>:<div className="notice notice-warn"><strong>Automatic scene pair not ready.</strong><span>Try again later or relax the cloud filter once manual scene selection is added.</span></div>}
+      <div className="sat-scene-grid"><SatelliteSceneCard scene={pair?.reference} label="Reference / before"/><SatelliteSceneCard scene={pair?.recent} label="Recent / after"/></div>
+      <div className="sat-pipeline">
+        <div className="sat-step done"><strong>1</strong><span>Sentinel-2 discovery<small>Earth Search STAC</small></span></div>
+        <div className="sat-step done"><strong>2</strong><span>Scene quality check<small>Date + cloud metadata</small></span></div>
+        <div className="sat-step done"><strong>3</strong><span>Before/after pairing<small>{pair?.status==='PAIR_READY'?'Ready':'Waiting for suitable pair'}</small></span></div>
+        <div className="sat-step pending"><strong>4</strong><span>Landslide segmentation<small>Landslide4Sense model weights + NER validation pending</small></span></div>
+      </div>
+      <p className="fine"><strong>Current boundary:</strong> PRAHARI can now discover and compare real Sentinel-2 acquisitions. It does not yet draw an automatic landslide mask, and no satellite scene is used to create a public warning without a validated detection model and human review.</p>
+    </>}
+  </section>;
+}
+
 function RiskMapPage({locations,selected,onSelect,onAssess,assessment}) {
   const [basemap,setBasemap]=useState('street');
   const [history,setHistory]=useState([]);
   const [forecast,setForecast]=useState(null);
-  const [extraError,setExtraError]=useState('');
-  useEffect(()=>{ if (!selected) return; setExtraError(''); Promise.allSettled([get(`/api/assessments/${selected.id}/history`),get(`/api/forecast-risk/${selected.id}`)]).then(([h,f])=>{if(h.status==='fulfilled')setHistory(h.value);if(f.status==='fulfilled')setForecast(f.value);}); },[selected?.id]);
+  useEffect(()=>{ if (!selected) return; Promise.allSettled([get(`/api/assessments/${selected.id}/history`),get(`/api/forecast-risk/${selected.id}`)]).then(([h,f])=>{if(h.status==='fulfilled')setHistory(h.value);if(f.status==='fulfilled')setForecast(f.value);}); },[selected?.id]);
+  const mapBasemap=basemap==='street'?'street':'satellite';
   return <div className="risk-map-page">
-    <div className="map-toolbar"><div><h1>Risk Map</h1><p>Map-led situational awareness with explicit data state.</p></div><div className="segmented"><button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button><button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite · visual only</button></div></div>
+    <div className="map-toolbar"><div><h1>Risk Map</h1><p>Weather risk, field evidence and satellite context remain explicitly separated.</p></div><div className="segmented"><button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button><button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite view</button><button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence')}>Sentinel-2 intelligence</button></div></div>
     <div className="map-layout">
-      <RiskMapView locations={locations} selected={selected} onSelect={onSelect} basemap={basemap}/>
+      <RiskMapView locations={locations} selected={selected} onSelect={onSelect} basemap={mapBasemap}/>
       <aside className="map-detail">
         <Panel title={selected?`${selected.name}, ${selected.state}`:'Select an area'} actions={selected&&<button className="btn btn-primary" onClick={onAssess}>Record assessment</button>}>
           {selected && <><div className="detail-risk"><RiskBadge level={assessment?.risk_level || selected.risk_level}/><strong>{assessment?.risk_percent == null ? 'Index unavailable' : `${fmt(assessment.risk_percent,0)} / 100`}</strong></div>
@@ -508,6 +613,7 @@ function RiskMapPage({locations,selected,onSelect,onAssess,assessment}) {
         <details className="disclosure"><summary>Forecast guidance</summary><div className="disclosure-body">{forecast?.available ? <div className="forecast-list">{forecast.points.map(p=><div key={p.horizon}><strong>{p.horizon}</strong><RiskBadge level={p.risk_level}/><span>{p.risk_index ?? '—'}/100</span></div>)}</div>:<p className="muted">{forecast?.note || 'Forecast guidance unavailable.'}</p>}<p className="fine">Screening trajectory only; not a calibrated probability forecast.</p></div></details>
       </aside>
     </div>
+    {basemap==='intelligence'&&<SatelliteIntelligence selected={selected}/>}
   </div>;
 }
 
