@@ -559,36 +559,82 @@ function SatelliteSceneCard({scene,label}) {
 
 function SatelliteIntelligence({selected}) {
   const [data,setData]=useState(null);
+  const [model,setModel]=useState(null);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   async function load(){
     if(!selected)return;
     setBusy(true);setError('');
     try{
-      let out=await get(`/api/satellite/sentinel2/${selected.id}?days=120&max_cloud=45&limit=12`);
+      const [sceneResult,modelResult]=await Promise.allSettled([
+        get(`/api/satellite/sentinel2/${selected.id}?days=120&max_cloud=45&limit=12`),
+        get('/api/satellite/model/status')
+      ]);
+      let out=sceneResult.status==='fulfilled'?sceneResult.value:{status:'SOURCE_UNAVAILABLE',error:sceneResult.reason?.message||'Backend STAC lookup failed'};
       if(out?.status==='SOURCE_UNAVAILABLE'){
         try{out=await browserSentinel2Search(selected);}catch(browserError){throw new Error(`${out.error||'Satellite catalog unavailable'}; browser fallback: ${browserError.message}`);}
       }
       setData(out);
+      if(modelResult.status==='fulfilled')setModel(modelResult.value);
+      else setModel({status:'UNAVAILABLE',operational_warning:modelResult.reason?.message||'Model status unavailable'});
     }catch(e){setError(e.message);setData(null);}finally{setBusy(false);}
   }
   useEffect(()=>{load();},[selected?.id]);
   const pair=data?.pair;
-  return <section className="sat-intel">
-    <div className="sat-intel-head"><div><span className="eyebrow">Satellite intelligence · Sentinel-2 L2A</span><h2>Post-event scene review</h2><p>Real optical acquisitions are searched around {selected?selected.name:'the selected area'} and paired for before/after review.</p></div><button className="btn btn-secondary" onClick={load} disabled={busy}>{busy?'Searching…':'Refresh scenes'}</button></div>
+  const modelReady=model?.status==='READY';
+  return <section className="sat-intel sat-intel-focus">
+    <div className="sat-intel-head">
+      <div><span className="eyebrow">Satellite intelligence · Sentinel-2 L2A</span><h2>{selected?selected.name:'Selected area'} · before/after scene analysis</h2><p>Real Sentinel-2 acquisitions are searched, quality-screened and paired before any post-event detection stage is considered.</p></div>
+      <div className="sat-head-actions"><Badge tone={data?.status==='AVAILABLE'?'good':'warn'}>{data?.status||'SEARCHING'}</Badge><button className="btn btn-secondary" onClick={load} disabled={busy}>{busy?'Searching…':'Refresh scenes'}</button></div>
+    </div>
     {error&&<div className="notice notice-error"><strong>Satellite catalog unavailable.</strong><span>{error}</span></div>}
     {!error&&busy&&!data&&<Loading/>}
     {data&&<>
-      <div className="sat-status-row"><Badge tone={data.status==='AVAILABLE'?'good':'warn'}>{data.status}</Badge><span>{data.scene_count||0} scenes found</span><span>Cloud filter ≤ {fmt(data.max_cloud_pct,0)}%</span><span>{data.transport==='BROWSER_DIRECT_STAC'?'Browser-direct STAC':'Backend STAC'}</span></div>
-      {pair?.status==='PAIR_READY'?<div className="notice notice-warn"><strong>Scene pair ready for review.</strong><span>{pair.days_between} days separate the reference and recent acquisitions. This does not mean a landslide has been detected.</span></div>:<div className="notice notice-warn"><strong>Automatic scene pair not ready.</strong><span>Try again later or relax the cloud filter once manual scene selection is added.</span></div>}
-      <div className="sat-scene-grid"><SatelliteSceneCard scene={pair?.reference} label="Reference / before"/><SatelliteSceneCard scene={pair?.recent} label="Recent / after"/></div>
-      <div className="sat-pipeline">
-        <div className="sat-step done"><strong>1</strong><span>Sentinel-2 discovery<small>Earth Search STAC</small></span></div>
-        <div className="sat-step done"><strong>2</strong><span>Scene quality check<small>Date + cloud metadata</small></span></div>
-        <div className="sat-step done"><strong>3</strong><span>Before/after pairing<small>{pair?.status==='PAIR_READY'?'Ready':'Waiting for suitable pair'}</small></span></div>
-        <div className="sat-step pending"><strong>4</strong><span>Landslide segmentation<small>Landslide4Sense model weights + NER validation pending</small></span></div>
+      <div className="sat-overview-strip">
+        <div><span>Scene source</span><strong>Sentinel-2 L2A</strong><small>Element 84 Earth Search STAC</small></div>
+        <div><span>Scenes found</span><strong>{data.scene_count||0}</strong><small>Last {data.search_days||120} days</small></div>
+        <div><span>Cloud filter</span><strong>≤ {fmt(data.max_cloud_pct,0)}%</strong><small>Scene-level metadata</small></div>
+        <div><span>Scene pair</span><strong>{pair?.status==='PAIR_READY'?'Ready':'Not ready'}</strong><small>{pair?.days_between?`${pair.days_between} days apart`:'Needs suitable reference'}</small></div>
+        <div><span>Segmentation engine</span><strong>{modelReady?'Configured':'Not configured'}</strong><small>{modelReady?model?.device:'Weights / runtime pending'}</small></div>
       </div>
-      <p className="fine"><strong>Current boundary:</strong> PRAHARI can now discover and compare real Sentinel-2 acquisitions. It does not yet draw an automatic landslide mask, and no satellite scene is used to create a public warning without a validated detection model and human review.</p>
+
+      {pair?.status==='PAIR_READY'
+        ? <div className="notice notice-warn"><strong>Real scene pair ready.</strong><span>The images below are genuine Sentinel-2 acquisitions. A scene pair is evidence for comparison, not proof of a landslide.</span></div>
+        : <div className="notice notice-warn"><strong>Automatic scene pair not ready.</strong><span>PRAHARI will not invent a before/after pair. Refresh later or add manual scene selection in a future revision.</span></div>}
+
+      <div className="sat-compare-title"><div><span className="eyebrow">Visual comparison</span><h3>Reference vs recent acquisition</h3></div><span className="sat-transport">{data.transport==='BROWSER_DIRECT_STAC'?'Browser-direct STAC fallback':'Backend STAC lookup'}</span></div>
+      <div className="sat-scene-grid sat-scene-grid-large">
+        <SatelliteSceneCard scene={pair?.reference} label="Reference / before"/>
+        <SatelliteSceneCard scene={pair?.recent} label="Recent / after"/>
+      </div>
+
+      <div className="sat-analysis-panel">
+        <div className="sat-analysis-copy">
+          <span className="eyebrow">Landslide4Sense-compatible segmentation</span>
+          <h3>{modelReady?'Model adapter ready':'Model adapter installed · weights not configured'}</h3>
+          <p>PRAHARI now includes the official-baseline-compatible 14-channel U-Net adapter. It expects a 128×128 patch containing Sentinel-2 B1–B12 plus slope and DEM, normalized with the benchmark statistics.</p>
+          <div className="sat-model-meta">
+            <span><strong>Benchmark reference:</strong> {model?.benchmark_reference?.f1_pct??57.82}% F1 on Landslide4Sense validation</span>
+            <span><strong>NER validation:</strong> {model?.regional_validation||'NOT_PERFORMED'}</span>
+          </div>
+        </div>
+        <div className="sat-model-state">
+          <Badge tone={modelReady?'good':'warn'}>{model?.status||'NOT_CONFIGURED'}</Badge>
+          <button className="btn btn-primary" disabled title={modelReady?'Automated Earth-Search-to-14-channel preprocessing is the next integration step.':'Install PyTorch and compatible Landslide4Sense weights first.'}>Run segmentation</button>
+          <small>{modelReady?'Live-scene preprocessing/DEM alignment still required before this button is enabled.':'The online Render API stays lightweight; inference is intended for a dedicated/local GPU worker until a production inference service is provisioned.'}</small>
+        </div>
+      </div>
+
+      <div className="sat-pipeline">
+        <div className="sat-step done"><strong>1</strong><span>Sentinel-2 discovery<small>Real Earth Search STAC scenes</small></span></div>
+        <div className="sat-step done"><strong>2</strong><span>Scene quality check<small>Date + cloud metadata</small></span></div>
+        <div className={`sat-step ${pair?.status==='PAIR_READY'?'done':'pending'}`}><strong>3</strong><span>Before/after pairing<small>{pair?.status==='PAIR_READY'?'Pair ready':'Waiting for suitable pair'}</small></span></div>
+        <div className={`sat-step ${modelReady?'done':'pending'}`}><strong>4</strong><span>U-Net inference adapter<small>{modelReady?'Weights available':'Compatible weights required'}</small></span></div>
+        <div className="sat-step pending"><strong>5</strong><span>Live-scene preprocessing<small>12 bands + authoritative DEM/slope → 128×128×14</small></span></div>
+        <div className="sat-step pending"><strong>6</strong><span>Candidate polygons<small>Human review before inventory/alerts</small></span></div>
+      </div>
+
+      <p className="fine"><strong>Current boundary:</strong> scene discovery and pairing are live. The U-Net adapter is implemented, but PRAHARI will not call a live Sentinel-2 scene “detected landslide” until the 14-channel preprocessing path, compatible weights, and Northeast India validation are all in place.</p>
     </>}
   </section>;
 }
@@ -598,22 +644,24 @@ function RiskMapPage({locations,selected,onSelect,onAssess,assessment}) {
   const [history,setHistory]=useState([]);
   const [forecast,setForecast]=useState(null);
   useEffect(()=>{ if (!selected) return; Promise.allSettled([get(`/api/assessments/${selected.id}/history`),get(`/api/forecast-risk/${selected.id}`)]).then(([h,f])=>{if(h.status==='fulfilled')setHistory(h.value);if(f.status==='fulfilled')setForecast(f.value);}); },[selected?.id]);
-  const mapBasemap=basemap==='street'?'street':'satellite';
+
   return <div className="risk-map-page">
-    <div className="map-toolbar"><div><h1>Risk Map</h1><p>Weather risk, field evidence and satellite context remain explicitly separated.</p></div><div className="segmented"><button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button><button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite view</button><button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence')}>Sentinel-2 intelligence</button></div></div>
-    <div className="map-layout">
-      <RiskMapView locations={locations} selected={selected} onSelect={onSelect} basemap={mapBasemap}/>
-      <aside className="map-detail">
-        <Panel title={selected?`${selected.name}, ${selected.state}`:'Select an area'} actions={selected&&<button className="btn btn-primary" onClick={onAssess}>Record assessment</button>}>
-          {selected && <><div className="detail-risk"><RiskBadge level={assessment?.risk_level || selected.risk_level}/><strong>{assessment?.risk_percent == null ? 'Index unavailable' : `${fmt(assessment.risk_percent,0)} / 100`}</strong></div>
-          <StateBadge state={assessment?.data_state || selected.data_state}/>
-          <dl className="kv"><dt>24 h rain</dt><dd>{fmt(assessment?.rainfall ?? selected.rainfall)} mm</dd><dt>72 h antecedent rain</dt><dd>{fmt(assessment?.antecedent_rainfall_72h ?? selected.antecedent_rainfall_72h)} mm</dd><dt>Soil wetness</dt><dd>{fmt(assessment?.soil_moisture ?? selected.soil_moisture)}%</dd><dt>Slope context</dt><dd>{fmt(selected.slope)}° <Badge>prototype</Badge></dd></dl></>}
-        </Panel>
-        <details className="disclosure" open><summary>Assessment history</summary><div className="disclosure-body history-list">{history.length?history.slice(0,8).map(h=><div key={h.id}><RiskBadge level={h.risk_level}/><span>{h.mode}</span><span>{fmtTime(h.created_at)}</span></div>):<p className="muted">No recorded assessments yet.</p>}</div></details>
-        <details className="disclosure"><summary>Forecast guidance</summary><div className="disclosure-body">{forecast?.available ? <div className="forecast-list">{forecast.points.map(p=><div key={p.horizon}><strong>{p.horizon}</strong><RiskBadge level={p.risk_level}/><span>{p.risk_index ?? '—'}/100</span></div>)}</div>:<p className="muted">{forecast?.note || 'Forecast guidance unavailable.'}</p>}<p className="fine">Screening trajectory only; not a calibrated probability forecast.</p></div></details>
-      </aside>
-    </div>
-    {basemap==='intelligence'&&<SatelliteIntelligence selected={selected}/>}
+    <div className="map-toolbar"><div><h1>{basemap==='intelligence'?'Satellite Intelligence':'Risk Map'}</h1><p>{basemap==='intelligence'?'Real Sentinel-2 scene review is separated from weather-risk screening and visual basemaps.':'Weather risk, field evidence and satellite context remain explicitly separated.'}</p></div><div className="segmented"><button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button><button className={basemap===='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite view</button><button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence)}>Sentinel-2 intelligence</button></div></div>
+
+    {basemap==='intelligence'
+      ? <SatelliteIntelligence selected={selected}/>
+      : <div className="map-layout">
+          <RiskMapView locations={locations} selected={selected} onSelect={onSelect} basemap={basemap}/>
+          <aside className="map-detail">
+            <Panel title={selected?`${selected.name}, ${selected.state}`:'Select an area'} actions={selected&&<button className="btn btn-primary" onClick={onAssess}>Record assessment</button>}>
+              {selected && <><div className="detail-risk"><RiskBadge level={assessment?.risk_level || selected.risk_level}/><strong>{assessment?.risk_percent == null ? 'Index unavailable' : `${fmt(assessment.risk_percent,0)} / 100`}</strong></div>
+              <StateBadge state={assessment?.data_state || selected.data_state}/>
+              <dl className="kv"><dt>24 h rain</dt><dd>{fmt(assessment?.rainfall ?? selected.rainfall)} mm</dd><dt>72 h antecedent rain</dt><dd>{fmt(assessment?.antecedent_rainfall_72h ?? selected.antecedent_rainfall_72h)} mm</dd><dt>Soil wetness</dt><dd>{fmt(assessment?.soil_moisture ?? selected.soil_moisture)}%</dd><dt>Slope context</dt><dd>{fmt(selected.slope)}° <Badge>prototype</Badge></dd></dl></>}
+            </Panel>
+            <details className="disclosure" open><summary>Assessment history</summary><div className="disclosure-body history-list">{history.length?history.slice(0,8).map((=><div key={h.id}><RiskBadge level={h.risk_level}/><span>{h.mode}</span><span>{fmtTime(h.created_at)}</span></div>):<p className="muted">No recorded assessments yet.</p>}</div></details>
+            <details className="disclosure"><summary>Forecast guidance</summary><div className="disclosure-body">{forecast?.available ? <div className="forecast-list">{forecast.points.map(p=><div key={p.horizon}><strong>{p.horizon}</strong><RiskBadge level={p.risk_level}/><span>{p.risk_index ?? '—'}/100</span></div>)}</div>:<p className="muted">{forecast?.note || 'Forecast guidance unavailable.'}</p>}<p className="fine">Screening trajectory only; not a calibrated probability forecast.</p></div></details>
+          </aside>
+        </div>}
   </div>;
 }
 
