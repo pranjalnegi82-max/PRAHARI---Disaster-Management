@@ -1,0 +1,4 @@
+-r requirements.txt
+# Optional satellite inference stack. Keep this separate from the lightweight
+# Render API unless a machine with enough RAM/CPU/GPU is assigned to inference.
+torch>=2.2,<3.0
