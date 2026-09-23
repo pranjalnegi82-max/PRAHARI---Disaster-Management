@@ -301,3 +301,23 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
   .sat-intel-focus .sat-pipeline{grid-template-columns:1fr}
   .sat-scene-grid-large .sat-scene-card img{min-height:190px}
 }
+
+
+/* v9.7 — live satellite preprocessing + candidate review */
+.sat-result-panel{
+  margin:16px 0;
+  padding:16px;
+  border:1px solid var(--border);
+  border-radius:16px;
+  background:var(--surface);
+}
+.sat-result-panel h3{margin:4px 0 6px}
+.sat-result-panel p{margin:4px 0;color:var(--muted)}
+.sat-result-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 4px;font-size:.78rem;color:var(--muted)}
+.sat-result-detection{border-color:#e5c3b9}
+.sat-candidate-map{margin-top:14px}
+.sat-candidate-map .map-canvas{height:360px;border-radius:14px;border:1px solid var(--border);overflow:hidden}
+.sat-model-state .badge + .badge{margin-left:0}
+@media (max-width:700px){
+  .sat-candidate-map .map-canvas{height:280px}
+}
