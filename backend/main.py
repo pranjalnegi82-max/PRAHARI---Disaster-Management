@@ -172,21 +172,24 @@ def fetch_live_weather(x, force=False):
     if cached and not force and now - cached['cached_at'] < LIVE_TTL_SECONDS:
         return cached['packet']
 
+    # Keep the request compact and Render-friendly. We need 11 days of
+    # antecedent rainfall for the research features, so 264 past hours are
+    # sufficient. forecast_hours gives the exact +72 h horizon; forecast_days
+    # is intentionally not combined with it.
     params = {
         'latitude': x['lat'],
         'longitude': x['lon'],
         'timezone': 'auto',
         'current': ','.join([
             'temperature_2m','relative_humidity_2m','precipitation','rain','cloud_cover',
-            'wind_speed_10m','wind_gusts_10m','soil_moisture_0_to_1cm'
+            'wind_speed_10m','wind_gusts_10m'
         ]),
         'hourly': ','.join([
             'precipitation','rain','precipitation_probability','temperature_2m',
             'relative_humidity_2m','soil_moisture_0_to_1cm'
         ]),
-        'past_days': 14,
-        'forecast_hours': 72,
-        'forecast_days': 4
+        'past_hours': 264,
+        'forecast_hours': 72
     }
     url = 'https://api.open-meteo.com/v1/forecast?' + urlencode(params)
     try:
@@ -215,12 +218,14 @@ def fetch_live_weather(x, force=False):
         probs = hourly.get('precipitation_probability') or []
         temps = hourly.get('temperature_2m') or []
         hums = hourly.get('relative_humidity_2m') or []
-        soil = current.get('soil_moisture_0_to_1cm')
-        if soil is None:
-            soil_series = hourly.get('soil_moisture_0_to_1cm') or []
-            if past_idx_all:
-                try: soil = soil_series[past_idx_all[-1]]
-                except Exception: soil = None
+        # Soil moisture is an hourly model field. Read the latest available
+        # hourly value instead of requesting it in the current block, which
+        # keeps compatibility across Open-Meteo model combinations.
+        soil = None
+        soil_series = hourly.get('soil_moisture_0_to_1cm') or []
+        if past_idx_all:
+            try: soil = soil_series[past_idx_all[-1]]
+            except Exception: soil = None
         # Convert volumetric water content to a 0-100 wetness proxy for the existing
         # prototype model. This is not a direct field-probe saturation percentage.
         soil_proxy = round(clamp(float(soil) / 0.5) * 100, 1) if soil is not None else None
