@@ -23,7 +23,7 @@ PRAHARI v9 uses the following projects as **research/design references**. No thi
 - Official repository contains a U-Net baseline and a 14-band benchmark (Sentinel-2 spectral bands plus slope and DEM). The repository is **MIT licensed** (copyright IARAI, 2022).
 - The official repository is a baseline; it is **not described as the winning implementation**. Competition outcome papers describe stronger Swin Transformer, SegFormer, U-Net and related solutions.
 - **Adapted concept:** PRAHARI explicitly separates post-event semantic segmentation/inventory mapping from susceptibility and future/near-term risk assessment. The segmentation module remains ROADMAP until dataset ingestion, trained weights and regional validation exist.
-- **Code reuse:** none in v9. If official baseline code is later incorporated, retain the MIT copyright/license notice.
+- **Code adaptation:** PRAHARI v9.6.1 now includes a Landslide4Sense baseline-compatible U-Net adapter in backend/satellite_l4s.py, using the official 14-channel architecture contract and normalization statistics. The source project is MIT licensed; the IARAI copyright/license notice is retained in the adapter and this record.
 
 ## Disaster reporting references
 - https://github.com/hiteshmeta85/sih-web — SIH 2022 NDRF-oriented portal for extracting disaster posts/tweets and geolocation. Its README uses Next.js, Google Maps, Chakra UI, Formik and Yup.
@@ -52,3 +52,11 @@ The user-supplied landslide papers remain documented in `RESEARCH_PAPER_SYNTHESI
 - The benchmark uses 12 Sentinel-2 multispectral bands plus ALOS PALSAR slope and DEM inputs, with pixel-wise landslide labels at approximately 10 m resolution.
 - PRAHARI v9.6 implements the real-scene discovery/pairing layer needed before inference, but does **not** claim to run the benchmark model yet.
 - A production detector still requires compatible trained weights, preprocessing matching the model's training distribution, cloud/nodata handling, Northeast India validation, and human review of generated polygons.
+
+
+### IARAI Landslide4Sense MIT notice
+The Landslide4Sense-2022 baseline repository is MIT licensed.
+
+Copyright (c) 2022 Institute of Advanced Research in Artificial Intelligence
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of the software and associated documentation files, to deal in the Software without restriction, including use, copy, modification, merge, publication, distribution, sublicense, and/or sale, subject to retaining the copyright and permission notice. The software is provided without warranty. See the upstream LICENSE file for the complete notice.
