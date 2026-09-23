@@ -38,3 +38,17 @@ PRAHARI v9 uses the following projects as **research/design references**. No thi
 
 ## Existing PRAHARI research papers
 The user-supplied landslide papers remain documented in `RESEARCH_PAPER_SYNTHESIS_V8.md` and `RESEARCH_REFERENCES.md`. v9 retains the uncertainty, antecedent-rainfall, people-centred warning, dynamic forcing and deformation-precursor lessons already derived from those materials.
+
+
+## Sentinel-2 scene discovery
+- **Element 84 Earth Search:** https://earth-search.aws.element84.com/v1
+- **Collection used:** `sentinel-2-l2a`.
+- **Adapted concept:** STAC-based search for recent cloud-screened Sentinel-2 Level-2A acquisitions around each PRAHARI monitored area. PRAHARI stores/displays acquisition time, scene cloud cover, platform, source STAC link, preview link, and key multispectral asset URLs where present.
+- **Operational boundary:** Scene discovery and before/after pairing are quality-control and evidence-review functions. They do not by themselves constitute landslide detection.
+- **Sentinel data:** retain provider/source attribution and applicable Copernicus/Sentinel data terms when imagery or derived products are redistributed.
+
+## Landslide4Sense integration boundary
+- Official reference: https://github.com/iarai/Landslide4Sense-2022
+- The benchmark uses 12 Sentinel-2 multispectral bands plus ALOS PALSAR slope and DEM inputs, with pixel-wise landslide labels at approximately 10 m resolution.
+- PRAHARI v9.6 implements the real-scene discovery/pairing layer needed before inference, but does **not** claim to run the benchmark model yet.
+- A production detector still requires compatible trained weights, preprocessing matching the model's training distribution, cloud/nodata handling, Northeast India validation, and human review of generated polygons.
