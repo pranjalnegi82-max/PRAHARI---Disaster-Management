@@ -43,7 +43,7 @@ DB = DB_PATH
 TILE_CACHE = BASE / "tile_cache" / "nasa"
 TILE_CACHE.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="PRAHARI Command Center API", version="9.5.0", description="Traceable landslide risk assessment with separate admin and field-officer portals for SIH26001")
+app = FastAPI(title="PRAHARI Command Center API", version="9.6.1", description="Traceable landslide risk assessment with separate admin and field-officer portals for SIH26001")
 app.add_middleware(GZipMiddleware, minimum_size=700)
 app.add_middleware(
     CORSMiddleware,
@@ -1115,7 +1115,7 @@ def startup_seed():
 
 @app.get("/")
 def root():
-    return {"service":"PRAHARI","status":"ok","version":"9.2.0","mode":"traceable-advisory-decision-support"}
+    return {"service":"PRAHARI","status":"ok","version":"9.6.1","mode":"traceable-advisory-decision-support"}
 
 
 @app.get("/api/system/status")
@@ -1129,7 +1129,7 @@ def status():
         "risk_engine": ml_status().get("engine", "transparent-fallback"),
         "alert_engine":"draft-advisory-lifecycle; operator review required",
         "browser_notifications":"frontend-ready",
-        "satellite_intelligence":"offline EO Lite + local NASA tile cache + optional online basemaps",
+        "satellite_intelligence":"Sentinel-2 live scene discovery/pairing + optional Landslide4Sense-compatible U-Net adapter; live 14-channel preprocessing pending",
         "map":"offline EO Lite / cached NASA / street / terrain / satellite",
         "weather":"Open-Meteo current/stale/missing states; no invented live fallback",
         "live_risk_refresh":"5-minute cache / manual force refresh",
