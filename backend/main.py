@@ -28,6 +28,7 @@ from settings import (ALLOWED_ORIGINS, AUTH_REQUIRED, APP_ENV, ADMIN_KEY, WEATHE
                       FIELD_OFFICERS_CONFIG_ERROR, ENV_SOURCE)
 from auth import resolve_role, require_role, field_officer_for_key
 from risk_baseline import assess as baseline_assess, VERSION as BASELINE_VERSION
+from satellite_l4s import status as l4s_status, infer_patch as l4s_infer_patch
 from notifications import (
     config_status as notification_config_status, normalize_e164, send as send_notification,
     fetch_status as fetch_notification_status, validate_signature as validate_twilio_signature,
@@ -1077,6 +1078,34 @@ def satellite_architecture():
             'earth_search':'Earth Search provides STAC discovery and cloud-optimized Sentinel-2 L2A assets.'
         }
     }
+
+
+@app.get("/api/satellite/model/status", tags=["Satellite Intelligence"])
+def satellite_model_status(role:str=Depends(resolve_role)):
+    if AUTH_REQUIRED and role == 'PUBLIC':
+        raise HTTPException(403,'Authenticated PRAHARI session required')
+    return l4s_status()
+
+@app.post("/api/satellite/model/infer-patch", tags=["Satellite Intelligence"])
+async def satellite_model_infer_patch(file:UploadFile=File(...), role:str=Depends(resolve_role)):
+    require_role(role,'ADMIN')
+    content=await file.read()
+    if len(content) > 4*1024*1024:
+        raise HTTPException(413,'Satellite patch file is too large; upload a 128x128x14 float32 .npy patch.')
+    if not (file.filename or '').lower().endswith('.npy'):
+        raise HTTPException(400,'Upload a .npy array using the Landslide4Sense 128x128x14 channel contract.')
+    try:
+        arr=np.load(io.BytesIO(content), allow_pickle=False)
+        result=l4s_infer_patch(arr)
+        result['filename']=file.filename
+        result['source_contract']='Uploaded 14-channel patch; Sentinel-2 B1..B12 + slope + DEM.'
+        return result
+    except RuntimeError as exc:
+        raise HTTPException(503,str(exc))
+    except ValueError as exc:
+        raise HTTPException(400,str(exc))
+    except Exception as exc:
+        raise HTTPException(500,f'Satellite inference failed: {type(exc).__name__}: {exc}')
 
 @app.on_event("startup")
 def startup_seed():
