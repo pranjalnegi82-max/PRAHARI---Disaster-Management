@@ -1,0 +1,61 @@
+services:
+  - type: web
+    name: prahari-sih26001-pranjal-api
+    runtime: python
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/system/status
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PRAHARI_ENV
+        value: production
+      - key: PRAHARI_AUTH_REQUIRED
+        value: "true"
+      - key: PRAHARI_ALLOWED_ORIGINS
+        value: https://prahari-sih26001-pranjal.onrender.com
+      - key: PRAHARI_PUBLIC_BASE_URL
+        value: https://prahari-sih26001-pranjal-api.onrender.com
+      - key: PRAHARI_SMS_ENABLED
+        value: "false"
+      - key: PRAHARI_NOTIFICATION_PROVIDER
+        value: twilio
+      - key: PRAHARI_TWILIO_VALIDATE_SIGNATURE
+        value: "true"
+      - key: PRAHARI_OPERATOR_KEY
+        sync: false
+      - key: PRAHARI_REVIEWER_KEY
+        sync: false
+      - key: PRAHARI_ADMIN_KEY
+        sync: false
+      - key: PRAHARI_FIELD_OFFICERS_JSON
+        sync: false
+      - key: PRAHARI_TWILIO_ACCOUNT_SID
+        sync: false
+      - key: PRAHARI_TWILIO_AUTH_TOKEN
+        sync: false
+      - key: PRAHARI_TWILIO_SMS_FROM
+        sync: false
+      - key: PRAHARI_TWILIO_MESSAGING_SERVICE_SID
+        sync: false
+
+  - type: web
+    name: prahari-sih26001-pranjal
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeployTrigger: commit
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: VITE_PRAHARI_API
+        value: https://prahari-sih26001-pranjal-api.onrender.com
