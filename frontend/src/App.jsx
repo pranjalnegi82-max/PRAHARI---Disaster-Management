@@ -22,6 +22,35 @@ const fmtTime = (v) => {
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
 };
 
+async function browserDirectLiveFallback(locations) {
+  if (!Array.isArray(locations) || !locations.length) return locations || [];
+  const params = new URLSearchParams({
+    latitude: locations.map(x=>x.lat).join(','),
+    longitude: locations.map(x=>x.lon).join(','),
+    timezone: 'auto',
+    current: 'temperature_2m,relative_humidity_2m,precipitation,rain,cloud_cover,wind_speed_10m,wind_gusts_10m',
+    hourly: 'precipitation,rain,precipitation_probability,temperature_2m,relative_humidity_2m,soil_moisture_0_to_1cm',
+    past_hours: '264',
+    forecast_hours: '72',
+  });
+  const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+  if (!response.ok) throw new Error(`Direct Open-Meteo fallback failed: ${response.status} ${response.statusText}`);
+  const raw = await response.json();
+  const payloads = Array.isArray(raw) ? raw : [raw];
+  if (payloads.length !== locations.length) throw new Error('Direct Open-Meteo fallback returned an unexpected location count.');
+  const assessed = await Promise.all(locations.map(async (loc,i)=>{
+    const parsed = await post(`/api/live/browser-relay/${loc.id}`, {provider:'OPEN_METEO', payload:payloads[i]});
+    return {...parsed, __browser_provider_payload:payloads[i]};
+  }));
+  return assessed;
+}
+
+function needsBrowserWeatherFallback(data) {
+  return Array.isArray(data) && data.length > 0 &&
+    data.every(x=>x.data_state==='MISSING') &&
+    data.some(x=>String(x.weather_error||'').includes('429'));
+}
+
 function Badge({children, tone='neutral'}) { return <span className={`badge badge-${tone}`}>{children}</span>; }
 function StateBadge({state}) {
   const tone = state === 'CURRENT' ? 'good' : state === 'STALE' || state === 'HISTORICAL_REPLAY' ? 'warn' : state === 'MISSING' ? 'danger' : 'neutral';
@@ -163,7 +192,12 @@ function FieldOfficerPortal({session,onLogout}) {
         get('/api/reports'), get('/api/alerts'), get('/api/field/households')
       ]);
       if(a.current_role!=='FIELD_OFFICER') throw new Error('This session is not authorized for the Field Officer Portal.');
-      setAuth(a); setProfile({...p,posting_location_id:p.location_id}); setLocations(l); setReports(r); setAlerts(al); setHouseholds(h);
+      let liveLocations=l;
+      if (needsBrowserWeatherFallback(liveLocations)) {
+        try { liveLocations=await browserDirectLiveFallback(liveLocations); }
+        catch (fallbackError) { console.warn('PRAHARI browser weather fallback unavailable:', fallbackError); }
+      }
+      setAuth(a); setProfile({...p,posting_location_id:p.location_id}); setLocations(liveLocations); setReports(r); setAlerts(al); setHouseholds(h);
     }catch(e){setError(e.message);}finally{setLoading(false);setRefreshing(false);}
   }
   useEffect(()=>{loadAll();},[]);
@@ -274,7 +308,11 @@ function AdminPortal({session,onLogout}) {
   async function loadLocations(force=false) {
     setError(''); setRefreshing(true);
     try {
-      const data = await get(`/api/live/locations?mode=${mode}&force=${force}`);
+      let data = await get(`/api/live/locations?mode=${mode}&force=${force}`);
+      if (mode==='live' && needsBrowserWeatherFallback(data)) {
+        try { data = await browserDirectLiveFallback(data); }
+        catch (fallbackError) { console.warn('PRAHARI browser weather fallback unavailable:', fallbackError); }
+      }
       setLocations(data);
       if (!data.some(x=>x.id===selectedId) && data[0]) setSelectedId(data[0].id);
     } catch (e) { setError(e.message); }
@@ -295,7 +333,9 @@ function AdminPortal({session,onLogout}) {
     if (!selected) return;
     setRefreshing(true); setError('');
     try {
-      const out = await post(`/api/assessments/${selected.id}?mode=${mode}&force=true`, {});
+      const out = mode==='live' && selected?.__browser_provider_payload
+        ? await post(`/api/assessments/${selected.id}/browser-relay`, {provider:'OPEN_METEO', payload:selected.__browser_provider_payload})
+        : await post(`/api/assessments/${selected.id}?mode=${mode}&force=true`, {});
       setAssessment(out.assessment); setAssessmentId(out.assessment_id);
       await loadLocations(true); await loadSideData();
     } catch(e) { setError(e.message); }
@@ -401,6 +441,7 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
       <StatCard icon="data" label="Data status" value={dataDetail} unit="" detail={`${fmt(location.data_completeness_pct,0)}% complete`} tone={location.data_state==='CURRENT'?'green':'amber'}/>
     </section>
 
+    {location.weather_transport==='BROWSER_DIRECT_RELAY' && <div className="notice notice-warn"><strong>Direct live-data transport active.</strong><span>Open-Meteo was fetched by this browser because the cloud backend was rate-limited. Values are live provider data, but the server did not independently re-fetch them.</span></div>}
     {stale && <div className="notice notice-warn"><strong>Cached observations in use.</strong><span>Review source timestamps before operational decisions.</span></div>}
     {missing && <div className="notice notice-error"><strong>Assessment incomplete.</strong><span>Missing data is not converted into low risk. Missing: {(location.missing_inputs||[]).join(', ') || 'required weather fields'}.</span></div>}
 
