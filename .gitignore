@@ -21,3 +21,8 @@ backend/uploads/*
 
 __pycache__/
 *.pyc
+
+# Satellite/ML weights are large runtime artifacts, not source.
+backend/models/*.pth
+backend/models/*.pt
+backend/models/*.ckpt
