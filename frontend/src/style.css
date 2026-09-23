@@ -237,3 +237,67 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
   .sat-pipeline{grid-template-columns:1fr}
   .sat-intel{padding:15px}
 }
+
+
+/* v9.6.1 — dedicated Sentinel-2 review workspace */
+.sat-intel-focus{margin-top:0}
+.sat-head-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sat-overview-strip{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:10px;
+  margin:14px 0 16px;
+}
+.sat-overview-strip>div{
+  padding:13px 14px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:var(--surface-soft);
+  min-width:0;
+}
+.sat-overview-strip span,.sat-overview-strip small{display:block;color:var(--muted);font-size:.78rem}
+.sat-overview-strip strong{display:block;margin:5px 0 3px;font-size:1rem}
+.sat-compare-title{display:flex;align-items:end;justify-content:space-between;gap:12px;margin:18px 0 10px}
+.sat-compare-title h3{margin:3px 0 0;font-size:1.05rem}
+.sat-transport{font-size:.78rem;color:var(--muted);font-weight:700}
+.sat-scene-grid-large .sat-scene-card img{aspect-ratio:16/9;min-height:260px}
+.sat-analysis-panel{
+  display:grid;
+  grid-template-columns:minmax(0,1.6fr) minmax(240px,.75fr);
+  gap:16px;
+  align-items:stretch;
+  margin:18px 0;
+  padding:17px;
+  border:1px solid var(--border);
+  border-radius:16px;
+  background:var(--surface-soft);
+}
+.sat-analysis-copy h3{margin:4px 0 7px}
+.sat-analysis-copy p{margin:0;color:var(--muted);line-height:1.55}
+.sat-model-meta{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;color:var(--muted);font-size:.8rem}
+.sat-model-state{
+  border-left:1px solid var(--border);
+  padding-left:16px;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  justify-content:center;
+  gap:10px;
+}
+.sat-model-state small{color:var(--muted);line-height:1.45}
+.sat-model-state .btn[disabled]{opacity:.58;cursor:not-allowed}
+.sat-intel-focus .sat-pipeline{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:1180px){
+  .sat-overview-strip{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media (max-width:900px){
+  .sat-overview-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sat-analysis-panel{grid-template-columns:1fr}
+  .sat-model-state{border-left:0;border-top:1px solid var(--border);padding:14px 0 0}
+  .sat-intel-focus .sat-pipeline{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:560px){
+  .sat-overview-strip{grid-template-columns:1fr}
+  .sat-intel-focus .sat-pipeline{grid-template-columns:1fr}
+  .sat-scene-grid-large .sat-scene-card img{min-height:190px}
+}
