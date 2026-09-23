@@ -198,3 +198,42 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
 @media(max-width:1000px){.login-card-wrap{grid-template-columns:1fr;gap:24px;max-width:720px}.login-intro{padding:10px 0}.login-intro h1{font-size:42px}.field-summary-grid{grid-template-columns:repeat(2,1fr)}.field-risk-context{grid-template-columns:repeat(2,1fr)}.field-action-grid{grid-template-columns:1fr}.session-card{grid-template-columns:1fr 1fr}.session-role,.session-card>.btn{grid-column:1/-1}}
 @media(max-width:650px){.login-brand{padding:18px 20px}.login-brand small{max-width:230px}.login-card-wrap{width:min(100% - 24px,560px);margin:5px auto 28px}.login-intro h1{font-size:35px}.login-intro>p{font-size:12px}.portal-choice{grid-template-columns:1fr}.login-panel{padding:13px}.field-summary-grid,.field-risk-context{grid-template-columns:1fr}.field-posting-mini{display:none}.portal-identity>div,.portal-logout span{display:none}.portal-logout{padding:8px}.field-top-title strong{font-size:12px}.portal-chip{display:none}.session-card{grid-template-columns:1fr}.session-card>*{grid-column:1/-1}}
 .portal-check{min-height:100vh;display:grid;place-items:center;background:#07192c}.portal-check-card{min-width:280px;display:flex;flex-direction:column;align-items:center;gap:10px;color:#dce9f4}.portal-check-card .loading{min-height:auto;color:#a9bdcf}.portal-check-card .brand-symbol{margin-bottom:6px}
+
+
+/* v9.6 — Sentinel-2 satellite intelligence */
+.sat-intel{
+  margin-top:18px;
+  padding:22px;
+  border:1px solid var(--border);
+  border-radius:18px;
+  background:var(--panel);
+  box-shadow:var(--shadow-sm);
+}
+.sat-intel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:14px}
+.sat-intel-head h2{margin:4px 0 5px;font-size:1.3rem}
+.sat-intel-head p{margin:0;color:var(--muted);max-width:760px}
+.sat-status-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 14px;color:var(--muted);font-size:.86rem}
+.sat-scene-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:16px 0}
+.sat-scene-card{overflow:hidden;border:1px solid var(--border);border-radius:16px;background:var(--surface)}
+.sat-scene-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px}
+.sat-scene-head strong{display:block;margin-top:3px}
+.sat-scene-card img{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;background:#dbe3ea}
+.sat-thumb-empty,.sat-scene-empty{min-height:180px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;color:var(--muted);background:var(--surface-soft)}
+.sat-scene-meta{display:flex;justify-content:space-between;gap:12px;padding:11px 14px;font-size:.82rem;color:var(--muted)}
+.sat-scene-meta a{font-weight:700;text-decoration:none;color:var(--accent)}
+.sat-pipeline{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}
+.sat-step{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--border);border-radius:14px;background:var(--surface-soft)}
+.sat-step>strong{display:grid;place-items:center;width:26px;height:26px;flex:0 0 26px;border-radius:999px;background:var(--surface);border:1px solid var(--border)}
+.sat-step span{font-size:.85rem;font-weight:700}
+.sat-step small{display:block;margin-top:3px;font-weight:500;color:var(--muted);line-height:1.35}
+.sat-step.done{border-color:#b8dfce;background:#f2fbf7}
+.sat-step.pending{border-style:dashed}
+@media (max-width:900px){
+  .sat-scene-grid{grid-template-columns:1fr}
+  .sat-pipeline{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sat-intel-head{flex-direction:column}
+}
+@media (max-width:560px){
+  .sat-pipeline{grid-template-columns:1fr}
+  .sat-intel{padding:15px}
+}
