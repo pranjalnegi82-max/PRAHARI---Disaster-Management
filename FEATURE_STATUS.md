@@ -16,7 +16,7 @@
 | Leaflet risk map | **Implemented** | Risk label + color, selected area sync, street/satellite visual basemap. |
 | Satellite imagery context | **Implemented** | NASA GIBS/Esri remain visual basemaps; Sentinel-2 L2A scene discovery now uses Element 84 Earth Search with real acquisition dates, cloud metadata and before/after scene pairing. |
 | Sentinel-2 scene QA / pairing | **Implemented** | Searches recent L2A acquisitions around the selected PRAHARI area, exposes source STAC records/thumbnails, and chooses a reference/recent pair when temporal separation and cloud metadata permit. Pair readiness is not a landslide detection result. |
-| Landslide4Sense segmentation | **Partial / model not configured** | Scene-ingestion groundwork is implemented. Pixel-level landslide masks still require trained Landslide4Sense-compatible weights, preprocessing parity and Northeast India validation before operational use. |
+| Landslide4Sense segmentation | **Partial / adapter implemented** | PRAHARI now includes an optional official-baseline-compatible 14-channel U-Net inference adapter plus a protected .npy patch inference API. Compatible weights, automated live-scene 14-channel preprocessing, and Northeast India validation are still required before enabling map masks. |
 | IoT ingestion | **Implemented API / hardware pending** | Real/simulated provenance is explicit; only real sensor packets can escalate advisories. |
 | Deformation trend screen | **Baseline/demo** | Point-sensor trend aid; not InSAR persistent homology or failure-time prediction. |
 | Infrastructure exposure | **Baseline/demo** | Seed asset inventory preserved; no authoritative GIS intersection claim. |
