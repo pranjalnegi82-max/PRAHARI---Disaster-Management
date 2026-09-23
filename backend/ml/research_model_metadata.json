@@ -1,0 +1,135 @@
+{
+  "project": "PRAHARI v8 Research Synthesis",
+  "model_type": "Monotonic XGBoost + LightGBM + Random Forest weighted ensemble",
+  "models": [
+    "XGBoost",
+    "LightGBM",
+    "RandomForest"
+  ],
+  "weights": {
+    "xgboost": 0.45,
+    "lightgbm": 0.35,
+    "random_forest": 0.2
+  },
+  "features": [
+    "rainfall_24h",
+    "antecedent_rainfall_72h",
+    "cumulative_rainfall_7d",
+    "effective_rainfall_11d",
+    "soil_moisture",
+    "slope",
+    "elevation",
+    "historical_risk",
+    "ndvi",
+    "rain_forecast_24h",
+    "max_hourly_rain_24h",
+    "season_sin",
+    "season_cos"
+  ],
+  "monotone_constraints": {
+    "rainfall_24h": 1,
+    "antecedent_rainfall_72h": 1,
+    "cumulative_rainfall_7d": 1,
+    "effective_rainfall_11d": 1,
+    "soil_moisture": 1,
+    "slope": 1,
+    "elevation": 0,
+    "historical_risk": 1,
+    "ndvi": -1,
+    "rain_forecast_24h": 1,
+    "max_hourly_rain_24h": 1,
+    "season_sin": 0,
+    "season_cos": 0
+  },
+  "training_rows": 7200,
+  "seed": 26001,
+  "validation": "4-fold GroupKFold over 8 synthetic pseudo-regions, then refit on all bootstrap rows",
+  "bootstrap_metrics": {
+    "roc_auc": 0.8143,
+    "f1": 0.5163,
+    "precision": 0.6254,
+    "recall": 0.4397,
+    "false_negative_rate": 0.5603,
+    "brier": 0.1223,
+    "folds": [
+      {
+        "roc_auc": 0.8069,
+        "f1": 0.5095,
+        "precision": 0.561,
+        "recall": 0.4667,
+        "false_negative_rate": 0.5333,
+        "brier": 0.1234,
+        "fold": 1,
+        "held_out_groups": [
+          2,
+          3
+        ]
+      },
+      {
+        "roc_auc": 0.8064,
+        "f1": 0.4788,
+        "precision": 0.613,
+        "recall": 0.3928,
+        "false_negative_rate": 0.6072,
+        "brier": 0.1203,
+        "fold": 2,
+        "held_out_groups": [
+          1,
+          5
+        ]
+      },
+      {
+        "roc_auc": 0.8337,
+        "f1": 0.5347,
+        "precision": 0.6781,
+        "recall": 0.4413,
+        "false_negative_rate": 0.5587,
+        "brier": 0.1121,
+        "fold": 3,
+        "held_out_groups": [
+          6,
+          7
+        ]
+      },
+      {
+        "roc_auc": 0.8103,
+        "f1": 0.5377,
+        "precision": 0.6555,
+        "recall": 0.4558,
+        "false_negative_rate": 0.5442,
+        "brier": 0.1334,
+        "fold": 4,
+        "held_out_groups": [
+          0,
+          4
+        ]
+      }
+    ],
+    "scheme": "4-fold GroupKFold over 8 synthetic pseudo-regions"
+  },
+  "feature_importance": {
+    "rainfall_24h": 0.2641,
+    "antecedent_rainfall_72h": 0.2868,
+    "cumulative_rainfall_7d": 0.0559,
+    "effective_rainfall_11d": 0.0272,
+    "soil_moisture": 0.1346,
+    "slope": 0.0535,
+    "elevation": 0.0266,
+    "historical_risk": 0.0325,
+    "ndvi": 0.0258,
+    "rain_forecast_24h": 0.0265,
+    "max_hourly_rain_24h": 0.04,
+    "season_sin": 0.0148,
+    "season_cos": 0.0116
+  },
+  "local_explainability": "XGBoost TreeSHAP contributions via pred_contribs",
+  "provenance": "Research-synthesis bootstrap ensemble trained on synthetic physics-guided labels for software integration. NOT field-validated Northeast India accuracy.",
+  "research_basis": [
+    "Stanley et al. (2021): XGBoost nowcasting with dynamic rainfall/soil moisture and probabilistic output.",
+    "Nocentini et al. (2024): spatiotemporal Random Forest with dynamic cumulative rainfall and seasonal variables.",
+    "Felsberg et al. (2022): blocked validation and explicit uncertainty from model/input variability.",
+    "Saito et al. (2010): distinguish short-intense from long-saturating rainfall regimes.",
+    "Pan et al. (2018): antecedent precipitation and 1-hour rainfall in data-scarce threshold screening."
+  ],
+  "production_path": "Retrain/calibrate on GSI/ISRO/NASA inventories plus high-resolution DEM, lithology, lineaments, LULC, GPM/SMAP/Sentinel and calibrated field telemetry; evaluate with spatial + temporal blocked validation and alert-performance audits."
+}

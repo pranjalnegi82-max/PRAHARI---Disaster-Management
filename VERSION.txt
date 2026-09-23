@@ -1,0 +1,2 @@
+PRAHARI v9.5.1
+Field-officer environment loading + safe auth configuration diagnostics

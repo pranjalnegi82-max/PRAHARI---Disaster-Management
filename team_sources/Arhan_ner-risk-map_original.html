@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NER Slope Risk Monitor</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="anonymous">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink: #0f1712;
+    --panel: #16221b;
+    --panel-raised: #1b2921;
+    --line: #2c3d31;
+    --sand: #ece5d4;
+    --sand-dim: #9fae9a;
+    --sand-faint: #6c7c6c;
+
+    --low: #5b9a5b;
+    --moderate: #c9a227;
+    --high: #e07a2c;
+    --critical: #c1443a;
+
+    --low-glow: rgba(91,154,91,0.28);
+    --moderate-glow: rgba(201,162,39,0.28);
+    --high-glow: rgba(224,122,44,0.30);
+    --critical-glow: rgba(193,68,58,0.34);
+  }
+
+  *{ box-sizing: border-box; }
+
+  html, body{
+    margin:0; padding:0; height:100%;
+    background: var(--ink);
+    color: var(--sand);
+    font-family: 'Space Grotesk', -apple-system, sans-serif;
+  }
+
+  .mono{ font-family: 'IBM Plex Mono', monospace; }
+
+  .app{
+    display:grid;
+    grid-template-columns: 340px 1fr;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar{
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    display:flex;
+    flex-direction: column;
+    min-height:0;
+    overflow-y:auto;
+  }
+
+  .sidebar-head{
+    padding: 22px 20px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .sidebar-head h1{
+    margin:0 0 6px;
+    font-size: 1.28rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height:1.2;
+  }
+  .sidebar-head p{
+    margin:0;
+    font-size: 0.83rem;
+    color: var(--sand-dim);
+    line-height:1.4;
+  }
+  .coord-readout{
+    margin-top:10px;
+    font-size: 0.72rem;
+    color: var(--sand-faint);
+    letter-spacing: 0.02em;
+  }
+
+  section{
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  section h2{
+    margin: 0 0 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--sand-faint);
+    letter-spacing: 0.04em;
+  }
+
+  /* Legend */
+  .legend-scale{
+    list-style:none; margin:0; padding:0;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .legend-scale li{
+    display:flex; align-items:center; gap:10px;
+    font-size: 0.86rem;
+  }
+  .legend-scale .swatch{
+    width:12px; height:12px; border-radius:50%;
+    flex-shrink:0;
+    box-shadow: 0 0 0 3px var(--glow, transparent);
+  }
+  .legend-scale li[data-risk="low"] .swatch{ background: var(--low); --glow: var(--low-glow); }
+  .legend-scale li[data-risk="moderate"] .swatch{ background: var(--moderate); --glow: var(--moderate-glow); }
+  .legend-scale li[data-risk="high"] .swatch{ background: var(--high); --glow: var(--high-glow); }
+  .legend-scale li[data-risk="critical"] .swatch{ background: var(--critical); --glow: var(--critical-glow); }
+  .legend-scale .risk-desc{ color: var(--sand-faint); font-size:0.76rem; margin-left:auto; }
+
+  /* Station list */
+  #stationList{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+  .station-item{
+    display:flex; align-items:center; gap:10px;
+    padding: 8px 8px;
+    border-radius: 4px;
+    cursor:pointer;
+    border: 1px solid transparent;
+    font-size: 0.84rem;
+    background: none;
+    color: var(--sand);
+    text-align:left;
+    width:100%;
+    font-family:inherit;
+  }
+  .station-item:hover{ background: var(--panel-raised); }
+  .station-item.active{
+    background: var(--panel-raised);
+    border-color: var(--line);
+  }
+  .station-item .dot{
+    width:9px; height:9px; border-radius:50%; flex-shrink:0;
+  }
+  .station-item .name{ flex:1; }
+  .station-item .state{ color: var(--sand-faint); font-size:0.72rem; }
+
+  /* Detail panel */
+  .detail-panel{ border-bottom:none; flex:1; }
+  .detail-empty{ color: var(--sand-faint); font-size: 0.84rem; }
+
+  .detail-title-row{
+    display:flex; align-items:baseline; justify-content:space-between;
+    margin-bottom: 2px;
+  }
+  .detail-title{ font-size: 1.02rem; font-weight:600; }
+  .risk-badge{
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 3px 8px;
+    border-radius: 3px;
+    color: #12180f;
+  }
+  .risk-badge.low{ background: var(--low); }
+  .risk-badge.moderate{ background: var(--moderate); }
+  .risk-badge.high{ background: var(--high); }
+  .risk-badge.critical{ background: var(--critical); color: #fbeceb; }
+
+  .detail-state{ color: var(--sand-faint); font-size:0.78rem; margin-bottom:14px; }
+
+  .metric-grid{
+    display:grid; grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .metric{
+    background: var(--panel-raised);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  .metric .label{ font-size: 0.68rem; color: var(--sand-faint); margin-bottom:4px; }
+  .metric .value{ font-size: 1.02rem; font-weight:500; }
+  .metric .unit{ font-size: 0.68rem; color: var(--sand-dim); margin-left:2px; font-weight:400; }
+
+  .prob-row{ margin-bottom: 14px; }
+  .prob-row .label{ font-size: 0.72rem; color: var(--sand-faint); margin-bottom:6px; display:flex; justify-content:space-between; }
+  .prob-track{
+    height: 6px; border-radius: 3px;
+    background: var(--panel-raised);
+    border: 1px solid var(--line);
+    overflow:hidden;
+  }
+  .prob-fill{ height:100%; border-radius:3px; }
+
+  .status-row{
+    font-size: 0.82rem;
+    line-height: 1.45;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    color: var(--sand);
+  }
+  .status-row .label{ color: var(--sand-faint); font-size:0.68rem; display:block; margin-bottom:4px; }
+
+  /* ---------- Map ---------- */
+  .map-wrap{ position:relative; min-height:0; }
+  #map{ position:absolute; inset:0; background: var(--ink); }
+
+  .leaflet-popup-content-wrapper{
+    background: var(--panel);
+    color: var(--sand);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .leaflet-popup-tip{ background: var(--panel); }
+  .leaflet-popup-content{ margin: 12px 14px; font-family:'Space Grotesk', sans-serif; }
+  .popup-title{ font-weight:600; font-size:0.94rem; margin-bottom:2px; }
+  .popup-state{ color: var(--sand-faint); font-size:0.72rem; margin-bottom:8px; }
+  .popup-rows{ display:flex; flex-direction:column; gap:3px; font-size:0.78rem; }
+  .popup-rows span.k{ color: var(--sand-faint); }
+  .popup-status{ margin-top:8px; padding-top:8px; border-top:1px solid var(--line); font-size:0.76rem; }
+  .leaflet-container a.leaflet-popup-close-button{ color: var(--sand-faint); }
+
+  .toast{
+    position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+    background: var(--panel); border:1px solid var(--line); color: var(--sand);
+    padding: 9px 16px; border-radius: 5px; font-size: 0.8rem;
+    z-index: 1000;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+
+  .map-fallback{
+    position:absolute; inset:0; overflow-y:auto;
+    padding: 28px;
+    background: var(--ink);
+  }
+  .map-fallback h2{ margin:0 0 4px; font-size:1.1rem; }
+  .map-fallback .note{ color: var(--sand-faint); font-size:0.82rem; margin-bottom:20px; }
+  .fallback-grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(230px,1fr)); gap:12px; }
+  .fallback-card{
+    background: var(--panel); border:1px solid var(--line); border-radius:6px; padding:14px;
+  }
+  .fallback-card .name{ font-weight:600; font-size:0.92rem; }
+  .fallback-card .state{ color:var(--sand-faint); font-size:0.74rem; margin-bottom:8px; }
+  .fallback-card .row{ font-size:0.76rem; display:flex; justify-content:space-between; margin-bottom:2px; color: var(--sand-dim); }
+
+  /* ---------- Mobile ---------- */
+  @media (max-width: 760px){
+    .app{ grid-template-columns: 1fr; grid-template-rows: 46vh 54vh; }
+    .sidebar{ border-right:none; border-bottom:1px solid var(--line); }
+  }
+
+  ::-webkit-scrollbar{ width:8px; }
+  ::-webkit-scrollbar-thumb{ background: var(--line); border-radius:4px; }
+  ::-webkit-scrollbar-track{ background: transparent; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <h1>NER Slope Risk Monitor</h1>
+      <p>Rainfall-triggered landslide &amp; flood-risk field stations across Northeast India.</p>
+      <div class="coord-readout mono" id="coordReadout">25.80&deg;N, 92.50&deg;E &middot; zoom 6</div>
+    </div>
+
+    <section>
+      <h2>Risk scale</h2>
+      <ul class="legend-scale">
+        <li data-risk="low"><span class="swatch"></span>Low<span class="risk-desc">0&ndash;25%</span></li>
+        <li data-risk="moderate"><span class="swatch"></span>Moderate<span class="risk-desc">25&ndash;50%</span></li>
+        <li data-risk="high"><span class="swatch"></span>High<span class="risk-desc">50&ndash;75%</span></li>
+        <li data-risk="critical"><span class="swatch"></span>Critical<span class="risk-desc">75&ndash;100%</span></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Stations (8)</h2>
+      <ul id="stationList"></ul>
+    </section>
+
+    <section class="detail-panel" id="detailPanel">
+      <h2>Selected location</h2>
+      <div id="detailBody"><p class="detail-empty">Click a marker or a station on the list to see its readings here.</p></div>
+    </section>
+  </aside>
+
+  <main class="map-wrap">
+    <div id="map" role="application" aria-label="Map of Northeast India showing landslide and flood risk stations"></div>
+    <div id="mapFallback" class="map-fallback" hidden>
+      <h2>Map unavailable</h2>
+      <p class="note">The interactive map couldn't load in this environment. Station readings are still available below.</p>
+      <div class="fallback-grid" id="fallbackGrid"></div>
+    </div>
+    <div id="toast" class="toast" hidden></div>
+  </main>
+</div>
+
+<script>
+  // ---------- Demo data (defined early so the fallback path works even if Leaflet never loads) ----------
+  var STATIONS = [
+    { id:'cherra', name:'Cherrapunji', state:'Meghalaya', lat:25.300, lon:91.700,
+      rainfall:210, soilMoisture:91, slope:38, probability:87, risk:'critical',
+      status:'Active slope saturation on the Sohra escarpment. Evacuation advisory issued for downhill hamlets.' },
+    { id:'aizawl', name:'Aizawl', state:'Mizoram', lat:23.727, lon:92.717,
+      rainfall:96, soilMoisture:74, slope:31, probability:63, risk:'high',
+      status:'Elevated risk on urban hill-cut slopes. Field team dispatched to Bawngkawn ward.' },
+    { id:'gangtok', name:'Gangtok', state:'Sikkim', lat:27.338, lon:88.607,
+      rainfall:88, soilMoisture:68, slope:34, probability:58, risk:'high',
+      status:'Elevated. Intermittent closures reported on the NH10 approach road.' },
+    { id:'kohima', name:'Kohima', state:'Nagaland', lat:25.674, lon:94.109,
+      rainfall:58, soilMoisture:52, slope:22, probability:34, risk:'moderate',
+      status:'Watch. Rainfall trending upward over the last 24 hours.' },
+    { id:'itanagar', name:'Itanagar', state:'Arunachal Pradesh', lat:27.086, lon:93.605,
+      rainfall:64, soilMoisture:55, slope:26, probability:41, risk:'moderate',
+      status:'Watch. Soil moisture rising on the Ganga Lake catchment slopes.' },
+    { id:'sonapur', name:'Sonapur', state:'Assam', lat:26.000, lon:92.050,
+      rainfall:42, soilMoisture:38, slope:4, probability:12, risk:'low',
+      status:'Stable. Routine monitoring, floodplain gauge within normal range.' },
+    { id:'imphal', name:'Imphal', state:'Manipur', lat:24.817, lon:93.937,
+      rainfall:30, soilMoisture:29, slope:6, probability:9, risk:'low',
+      status:'Stable. No anomalies across valley sensors.' },
+    { id:'agartala', name:'Agartala', state:'Tripura', lat:23.837, lon:91.279,
+      rainfall:35, soilMoisture:33, slope:5, probability:8, risk:'low',
+      status:'Stable. Routine monitoring, no active advisories.' }
+  ];
+
+  var RISK_COLOR = { low:'#5b9a5b', moderate:'#c9a227', high:'#e07a2c', critical:'#c1443a' };
+  var RISK_RADIUS = { low:8, moderate:10, high:13, critical:16 };
+  var RISK_LABEL = { low:'Low', moderate:'Moderate', high:'High', critical:'Critical' };
+
+  var NER_CENTER = [25.80, 92.50];
+  var NER_ZOOM = 6;
+
+  var markersById = {};
+  var activeId = null;
+  var map = null;
+
+  // ---------- Fallback if Leaflet itself fails to load ----------
+  function renderStaticFallback(){
+    var mapEl = document.getElementById('map');
+    if(mapEl) mapEl.hidden = true;
+    var fb = document.getElementById('mapFallback');
+    fb.hidden = false;
+    var grid = document.getElementById('fallbackGrid');
+    grid.innerHTML = STATIONS.map(function(s){
+      return '<div class="fallback-card">' +
+        '<div class="name" style="color:' + RISK_COLOR[s.risk] + '">' + s.name + '</div>' +
+        '<div class="state">' + s.state + ' &middot; ' + RISK_LABEL[s.risk] + '</div>' +
+        '<div class="row"><span>Rainfall</span><span class="mono">' + s.rainfall + ' mm</span></div>' +
+        '<div class="row"><span>Soil moisture</span><span class="mono">' + s.soilMoisture + '%</span></div>' +
+        '<div class="row"><span>Slope</span><span class="mono">' + s.slope + '&deg;</span></div>' +
+        '<div class="row"><span>Probability</span><span class="mono">' + s.probability + '%</span></div>' +
+      '</div>';
+    }).join('');
+  }
+
+  window.handleLeafletLoadFailure = function(){
+    renderStaticFallback();
+  };
+
+  // ---------- Sidebar: station list (does not depend on Leaflet) ----------
+  function buildStationList(){
+    var list = document.getElementById('stationList');
+    list.innerHTML = '';
+    STATIONS.forEach(function(s){
+      var li = document.createElement('li');
+      var btn = document.createElement('button');
+      btn.className = 'station-item';
+      btn.id = 'station-btn-' + s.id;
+      btn.innerHTML = '<span class="dot" style="background:' + RISK_COLOR[s.risk] + '"></span>' +
+                       '<span class="name">' + s.name + '</span>' +
+                       '<span class="state">' + s.state + '</span>';
+      btn.addEventListener('click', function(){ selectStation(s.id, true); });
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+  }
+  buildStationList();
+
+  // ---------- Sidebar: detail panel ----------
+  function renderDetail(s){
+    var body = document.getElementById('detailBody');
+    var probColor = RISK_COLOR[s.risk];
+    body.innerHTML =
+      '<div class="detail-title-row">' +
+        '<span class="detail-title">' + s.name + '</span>' +
+        '<span class="risk-badge ' + s.risk + '">' + RISK_LABEL[s.risk] + '</span>' +
+      '</div>' +
+      '<div class="detail-state">' + s.state + ' &middot; ' + s.lat.toFixed(3) + '&deg;N, ' + s.lon.toFixed(3) + '&deg;E</div>' +
+      '<div class="metric-grid">' +
+        '<div class="metric"><div class="label">Rainfall (24h)</div><div class="value mono">' + s.rainfall + '<span class="unit">mm</span></div></div>' +
+        '<div class="metric"><div class="label">Soil moisture</div><div class="value mono">' + s.soilMoisture + '<span class="unit">%</span></div></div>' +
+        '<div class="metric"><div class="label">Slope angle</div><div class="value mono">' + s.slope + '<span class="unit">&deg;</span></div></div>' +
+        '<div class="metric"><div class="label">Risk level</div><div class="value" style="color:' + probColor + '">' + RISK_LABEL[s.risk] + '</div></div>' +
+      '</div>' +
+      '<div class="prob-row">' +
+        '<div class="label"><span>Landslide probability</span><span class="mono">' + s.probability + '%</span></div>' +
+        '<div class="prob-track"><div class="prob-fill" style="width:' + s.probability + '%; background:' + probColor + '"></div></div>' +
+      '</div>' +
+      '<div class="status-row"><span class="label">Latest status</span>' + s.status + '</div>';
+  }
+
+  // ---------- Selection sync ----------
+  function selectStation(id, panTo){
+    var s = STATIONS.filter(function(x){ return x.id === id; })[0];
+    if(!s) return;
+    activeId = id;
+
+    STATIONS.forEach(function(st){
+      var el = document.getElementById('station-btn-' + st.id);
+      if(el) el.classList.toggle('active', st.id === id);
+    });
+
+    renderDetail(s);
+
+    if(map && markersById[id]){
+      if(panTo) map.panTo([s.lat, s.lon], { animate:true });
+      markersById[id].openPopup();
+    }
+  }
+
+  // ---------- Leaflet map ----------
+  var tileFallbackUsed = false;
+
+  function switchToBackupTiles(primaryLayer){
+    if(tileFallbackUsed) return;
+    tileFallbackUsed = true;
+    try{
+      map.removeLayer(primaryLayer);
+      var backup = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+      });
+      backup.addTo(map);
+      showToast('Primary map tiles were unavailable — switched to a backup tile source.');
+    }catch(e){ /* leave base as-is if even the backup fails to attach */ }
+  }
+
+  function showToast(msg){
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.hidden = false;
+    setTimeout(function(){ t.hidden = true; }, 5000);
+  }
+
+  function initMap(){
+    map = L.map('map', {
+      center: NER_CENTER,
+      zoom: NER_ZOOM,
+      minZoom: 5,
+      maxZoom: 14,
+      scrollWheelZoom: true
+    });
+
+    var primaryTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+    primaryTiles.addTo(map);
+    primaryTiles.on('tileerror', function(){ switchToBackupTiles(primaryTiles); });
+
+    map.on('move zoom', function(){
+      var c = map.getCenter();
+      document.getElementById('coordReadout').textContent =
+        c.lat.toFixed(2) + '\u00B0N, ' + c.lng.toFixed(2) + '\u00B0E \u00B7 zoom ' + map.getZoom();
+    });
+
+    var riskLayer = L.layerGroup().addTo(map);
+    var markerLayer = L.layerGroup().addTo(map);
+
+    STATIONS.forEach(function(s){
+      var color = RISK_COLOR[s.risk];
+
+      var zoneRadiusM = { low:14000, moderate:20000, high:28000, critical:36000 }[s.risk];
+      L.circle([s.lat, s.lon], {
+        radius: zoneRadiusM,
+        color: color,
+        weight: 1,
+        opacity: 0.35,
+        fillColor: color,
+        fillOpacity: 0.14,
+        interactive: false
+      }).addTo(riskLayer);
+
+      var marker = L.circleMarker([s.lat, s.lon], {
+        radius: RISK_RADIUS[s.risk],
+        color: '#0f1712',
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.95
+      }).addTo(markerLayer);
+
+      var popupHtml =
+        '<div class="popup-title">' + s.name + '</div>' +
+        '<div class="popup-state">' + s.state + '</div>' +
+        '<div class="popup-rows">' +
+          '<div><span class="k">Rainfall (24h): </span>' + s.rainfall + ' mm</div>' +
+          '<div><span class="k">Soil moisture: </span>' + s.soilMoisture + '%</div>' +
+          '<div><span class="k">Slope angle: </span>' + s.slope + '&deg;</div>' +
+          '<div><span class="k">Probability: </span>' + s.probability + '% (' + RISK_LABEL[s.risk] + ')</div>' +
+        '</div>' +
+        '<div class="popup-status">' + s.status + '</div>';
+      marker.bindPopup(popupHtml, { maxWidth: 240 });
+
+      marker.on('click', function(){ selectStation(s.id, false); });
+
+      markersById[s.id] = marker;
+    });
+
+    selectStation('cherra', false);
+  }
+
+  // ---------- Boot: run once the DOM (and, hopefully, Leaflet) is ready ----------
+  function boot(){
+    try{
+      if(typeof L === 'undefined'){
+        renderStaticFallback();
+      } else {
+        initMap();
+      }
+    }catch(err){
+      renderStaticFallback();
+    }
+  }
+
+  if(document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(boot, 0);
+  } else {
+    document.addEventListener('DOMContentLoaded', boot);
+  }
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous" onerror="handleLeafletLoadFailure()"></script>
+
+</body>
+</html>

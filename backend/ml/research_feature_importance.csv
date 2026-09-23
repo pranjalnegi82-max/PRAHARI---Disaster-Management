@@ -1,0 +1,14 @@
+feature,importance
+antecedent_rainfall_72h,0.2868
+rainfall_24h,0.2641
+soil_moisture,0.1346
+cumulative_rainfall_7d,0.0559
+slope,0.0535
+max_hourly_rain_24h,0.04
+historical_risk,0.0325
+effective_rainfall_11d,0.0272
+elevation,0.0266
+rain_forecast_24h,0.0265
+ndvi,0.0258
+season_sin,0.0148
+season_cos,0.0116

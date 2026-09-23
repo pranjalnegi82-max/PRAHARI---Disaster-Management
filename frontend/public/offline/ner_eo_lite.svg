@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
+ <defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#061a27"/><stop offset="1" stop-color="#102b32"/></linearGradient>
+  <pattern id="grid" width="80" height="80" patternUnits="userSpaceOnUse"><path d="M80 0H0V80" fill="none" stroke="#4f8190" stroke-opacity=".11"/></pattern>
+ </defs>
+ <rect width="1200" height="900" fill="url(#bg)"/><rect width="1200" height="900" fill="url(#grid)"/>
+ <g fill="none" stroke="#6ba6a7" stroke-opacity=".30" stroke-width="2">
+  <path d="M55 720 C170 640 210 675 320 570 S500 520 600 405 S760 350 875 250 S1050 205 1150 100"/>
+  <path d="M20 790 C180 720 260 740 355 640 S540 590 650 485 S840 430 980 320 S1080 280 1190 190"/>
+  <path d="M90 610 C220 550 290 585 390 490 S575 430 690 345 S880 300 1060 185"/>
+  <path d="M160 820 C290 760 380 780 500 680 S710 625 830 520 S1000 485 1170 365"/>
+ </g>
+ <g fill="#143c45" stroke="#62b9b0" stroke-opacity=".45" stroke-width="3">
+  <path d="M250 610 L320 475 405 430 470 340 565 360 620 285 735 300 790 230 905 300 1010 380 970 495 860 525 820 620 700 665 600 640 510 700 400 670 330 710Z"/>
+ </g>
+ <g fill="#91c6c0" font-family="system-ui, sans-serif" text-anchor="middle">
+  <text x="700" y="455" font-size="32" font-weight="700" opacity=".8">NORTHEAST INDIA</text>
+  <text x="700" y="495" font-size="18" opacity=".7">LOCAL LOW-BANDWIDTH GEOSPATIAL CONTEXT</text>
+  <text x="700" y="530" font-size="16" fill="#f0c76a">NOT SATELLITE IMAGERY</text>
+ </g>
+ <g fill="#79a9aa" font-family="system-ui,sans-serif" font-size="16" opacity=".75">
+  <text x="360" y="520">Sikkim</text><text x="520" y="610">Assam</text><text x="735" y="355">Arunachal Pradesh</text><text x="720" y="590">Nagaland</text><text x="640" y="690">Manipur</text><text x="490" y="700">Meghalaya</text><text x="770" y="730">Mizoram</text><text x="610" y="790">Tripura</text>
+ </g>
+</svg>
