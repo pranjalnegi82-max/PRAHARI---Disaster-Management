@@ -30,6 +30,7 @@ from settings import (ALLOWED_ORIGINS, AUTH_REQUIRED, APP_ENV, ADMIN_KEY, WEATHE
 from auth import resolve_role, require_role, field_officer_for_key
 from risk_baseline import assess as baseline_assess, VERSION as BASELINE_VERSION
 from satellite_l4s import status as l4s_status, infer_patch as l4s_infer_patch
+from satellite_preprocess import status as satprep_status, prepare_patch as satprep_prepare_patch, patch_summary as satprep_patch_summary, candidate_geojson as satprep_candidate_geojson
 from notifications import (
     config_status as notification_config_status, normalize_e164, send as send_notification,
     fetch_status as fetch_notification_status, validate_signature as validate_twilio_signature,
@@ -1086,6 +1087,74 @@ def satellite_model_status(role:str=Depends(resolve_role)):
     if AUTH_REQUIRED and role == 'PUBLIC':
         raise HTTPException(403,'Authenticated PRAHARI session required')
     return l4s_status()
+
+@app.get("/api/satellite/preprocess/status", tags=["Satellite Intelligence"])
+def satellite_preprocess_status(role:str=Depends(resolve_role)):
+    if AUTH_REQUIRED and role == 'PUBLIC':
+        raise HTTPException(403,'Authenticated PRAHARI session required')
+    return satprep_status()
+
+@app.post("/api/satellite/preprocess/{location_id}", tags=["Satellite Intelligence"])
+def satellite_prepare_location_patch(
+    location_id:int,
+    days:int=Query(120,ge=14,le=365),
+    max_cloud:float=Query(35,ge=0,le=100),
+    confirm_experimental:bool=False,
+    role:str=Depends(resolve_role)
+):
+    require_role(role,'ADMIN')
+    if not confirm_experimental:
+        raise HTTPException(400,'Set confirm_experimental=true after reviewing the preprocessing limitations.')
+    x=next((z for z in LOCATIONS if z['id']==location_id),None)
+    if not x:
+        raise HTTPException(404,'Location not found')
+    try:
+        _,meta=satprep_prepare_patch(x['lat'],x['lon'],days=days,max_cloud=max_cloud,persist=True)
+        out=satprep_patch_summary(meta)
+        out['location_id']=location_id
+        out['location']=f"{x['name']}, {x['state']}"
+        out['status']='PATCH_READY'
+        out['note']='A live 128x128x14 research patch was prepared. Dataset parity is not verified; do not treat this as a detection result.'
+        return out
+    except RuntimeError as exc:
+        raise HTTPException(503,str(exc))
+    except Exception as exc:
+        raise HTTPException(500,f'Satellite patch preparation failed: {type(exc).__name__}: {exc}')
+
+@app.post("/api/satellite/model/infer-location/{location_id}", tags=["Satellite Intelligence"])
+def satellite_infer_location(
+    location_id:int,
+    days:int=Query(120,ge=14,le=365),
+    max_cloud:float=Query(35,ge=0,le=100),
+    confirm_experimental:bool=False,
+    role:str=Depends(resolve_role)
+):
+    require_role(role,'ADMIN')
+    if not confirm_experimental:
+        raise HTTPException(400,'Set confirm_experimental=true after reviewing the model and preprocessing limitations.')
+    x=next((z for z in LOCATIONS if z['id']==location_id),None)
+    if not x:
+        raise HTTPException(404,'Location not found')
+    try:
+        patch,meta=satprep_prepare_patch(x['lat'],x['lon'],days=days,max_cloud=max_cloud,persist=True)
+        inference=l4s_infer_patch(patch)
+        polygons=satprep_candidate_geojson(inference.get('mask_rle') or [],meta)
+        return {
+            'status':'EXPERIMENTAL_MODEL_OUTPUT',
+            'location_id':location_id,
+            'location':f"{x['name']}, {x['state']}",
+            'patch':satprep_patch_summary(meta),
+            'inference':inference,
+            'candidate_polygons':polygons,
+            'human_review_required':True,
+            'warning':'This is a research post-event candidate segmentation. It is not a verified landslide, calibrated probability, forecast, or public warning.'
+        }
+    except RuntimeError as exc:
+        raise HTTPException(503,str(exc))
+    except ValueError as exc:
+        raise HTTPException(400,str(exc))
+    except Exception as exc:
+        raise HTTPException(500,f'Live satellite inference failed: {type(exc).__name__}: {exc}')
 
 @app.post("/api/satellite/model/infer-patch", tags=["Satellite Intelligence"])
 async def satellite_model_infer_patch(file:UploadFile=File(...), role:str=Depends(resolve_role)):
