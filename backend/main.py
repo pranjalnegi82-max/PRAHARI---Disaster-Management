@@ -179,16 +179,23 @@ def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
             req=UrlRequest(url, headers={'User-Agent':'PRAHARI-SIH26001/9.5 (+https://prahari-sih26001-pranjal.onrender.com)'})
             with urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode('utf-8'))
-        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+        except HTTPError as exc:
             last_error=exc
             if attempt < attempts-1:
-                time.sleep(0.6 * (attempt+1))
+                retry_after=exc.headers.get('Retry-After') if getattr(exc,'headers',None) else None
+                try: delay=float(retry_after) if retry_after else 2.5*(attempt+1)
+                except Exception: delay=2.5*(attempt+1)
+                time.sleep(min(max(delay,1.0),10.0))
+        except (URLError, TimeoutError, ValueError) as exc:
+            last_error=exc
+            if attempt < attempts-1:
+                time.sleep(0.8 * (attempt+1))
     raise last_error or RuntimeError('Weather provider request failed')
 
-def fetch_live_weather(x, force=False):
+def fetch_live_weather(x, force=False, data_override=None):
     now = int(time.time())
     cached = LIVE_WEATHER_CACHE.get(x['id'])
-    if cached and not force and now - cached['cached_at'] < LIVE_TTL_SECONDS:
+    if data_override is None and cached and not force and now - cached['cached_at'] < LIVE_TTL_SECONDS:
         return cached['packet']
 
     # Keep the request compact and Render-friendly. We need 11 days of
@@ -212,7 +219,7 @@ def fetch_live_weather(x, force=False):
     }
     url = 'https://api.open-meteo.com/v1/forecast?' + urlencode(params)
     try:
-        data = _fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=3)
+        data = data_override if data_override is not None else _fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=3)
         current = data.get('current') or {}
         hourly = data.get('hourly') or {}
         times = hourly.get('time') or []
@@ -458,18 +465,80 @@ def enrich_with_live(x, packet):
 def locs():
     return [enrich_with_live(x, build_replay_packet(x)) for x in LOCATIONS]
 
+def _missing_or_cached_packet(x, error_message:str):
+    """Return a real cached packet when fresh enough, otherwise explicit MISSING."""
+    now=int(time.time())
+    candidates=[]
+    mem=LIVE_WEATHER_CACHE.get(x['id'])
+    if mem and mem.get('packet'):
+        candidates.append({'packet':mem['packet'],'fetched_at':mem.get('cached_at',0)})
+    persisted=_load_source_cache(_cache_key_weather(x['id']))
+    if persisted:
+        candidates.append({'packet':persisted['payload'],'fetched_at':persisted.get('fetched_at',0)})
+    candidates.sort(key=lambda z:z.get('fetched_at',0), reverse=True)
+    if candidates:
+        age=max(0, now-int(candidates[0].get('fetched_at') or 0))
+        if age <= WEATHER_STALE_MAX_SECONDS:
+            stale=dict(candidates[0]['packet'])
+            stale.update({
+                'availability':'STALE','live':False,'stale_public':True,
+                'source':'Open-Meteo cached last-known packet',
+                'cache_age_seconds':age,'error':error_message,
+                'note':'Live refresh failed; using a real previously fetched Open-Meteo packet with preserved timestamp.'
+            })
+            return stale
+    return {
+        'availability':'MISSING','live':False,'stale_public':False,'location_id':x['id'],
+        'location':f"{x['name']}, {x['state']}",'source':'Open-Meteo unavailable',
+        'source_url':'https://open-meteo.com/','updated_at':None,'valid_time':None,
+        'error':error_message,'temperature_c':None,'humidity':None,'precipitation_now_mm':None,
+        'rain_now_mm':None,'cloud_cover_pct':None,'wind_kmh':None,'wind_gust_kmh':None,
+        'soil_moisture_m3m3':None,'soil_moisture_proxy_pct':None,'rainfall_6h_mm':None,
+        'rainfall_24h_mm':None,'antecedent_rainfall_72h_mm':None,'cumulative_rainfall_7d_mm':None,
+        'effective_rainfall_11d_mm':None,'max_hourly_rain_24h_mm':None,'rain_forecast_6h_mm':None,
+        'rain_forecast_24h_mm':None,'rain_forecast_48h_mm':None,'rain_forecast_72h_mm':None,
+        'max_rain_probability_24h':None,'forecast':[],
+        'note':'Live source unavailable and no sufficiently fresh cached observation exists. No values were fabricated.'
+    }
+
 def live_locs(force=False, mode='live'):
     if mode == 'replay':
         return [enrich_with_live(x, build_replay_packet(x)) for x in LOCATIONS]
     now=int(time.time())
     if LIVE_REGIONAL_CACHE['data'] is not None and not force and now-LIVE_REGIONAL_CACHE['ts'] < LIVE_TTL_SECONDS:
         return LIVE_REGIONAL_CACHE['data']
+
+    # Open-Meteo explicitly supports comma-separated coordinates. Fetch all
+    # monitored locations in one request so cloud hosting does not burst eight
+    # separate calls from the same shared outbound IP.
+    params = {
+        'latitude': ','.join(str(x['lat']) for x in LOCATIONS),
+        'longitude': ','.join(str(x['lon']) for x in LOCATIONS),
+        'timezone': 'auto',
+        'current': ','.join([
+            'temperature_2m','relative_humidity_2m','precipitation','rain','cloud_cover',
+            'wind_speed_10m','wind_gusts_10m'
+        ]),
+        'hourly': ','.join([
+            'precipitation','rain','precipitation_probability','temperature_2m',
+            'relative_humidity_2m','soil_moisture_0_to_1cm'
+        ]),
+        'past_hours': 264,
+        'forecast_hours': 72
+    }
+    url='https://api.open-meteo.com/v1/forecast?'+urlencode(params)
     packets={}
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        futures={ex.submit(fetch_live_weather,x,force):x for x in LOCATIONS}
-        for f,x in futures.items():
-            try: packets[x['id']]=f.result()
-            except Exception: packets[x['id']]=fetch_live_weather(x,False)
+    try:
+        batch=_fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=2)
+        if not isinstance(batch,list) or len(batch)!=len(LOCATIONS):
+            raise ValueError(f'Unexpected Open-Meteo batch response shape: {type(batch).__name__}')
+        for x,item in zip(LOCATIONS,batch):
+            packets[x['id']]=fetch_live_weather(x, force=True, data_override=item)
+    except Exception as exc:
+        err=f'{type(exc).__name__}: {exc}'
+        for x in LOCATIONS:
+            packets[x['id']]=_missing_or_cached_packet(x, err)
+
     data=[enrich_with_live(x,packets[x['id']]) for x in LOCATIONS]
     LIVE_REGIONAL_CACHE['ts']=now
     LIVE_REGIONAL_CACHE['data']=data
