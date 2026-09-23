@@ -326,8 +326,18 @@ def fetch_live_weather(x, force=False, data_override=None):
             'forecast': points,
             'note': 'Current conditions are model-derived. Soil moisture is converted to a wetness proxy for the prototype risk model.'
         }
-        LIVE_WEATHER_CACHE[x['id']]={'cached_at':now,'packet':packet}
-        _persist_source_cache(_cache_key_weather(x['id']), 'Open-Meteo', packet, cur_iso)
+        if data_override is None:
+            LIVE_WEATHER_CACHE[x['id']]={'cached_at':now,'packet':packet}
+            _persist_source_cache(_cache_key_weather(x['id']), 'Open-Meteo', packet, cur_iso)
+        else:
+            # Render's shared egress can be throttled by the free provider. In that
+            # case the authenticated web client may fetch the same CORS-enabled
+            # Open-Meteo response directly and relay the raw provider JSON here for
+            # parsing. Never write browser-relayed payloads into the trusted server
+            # source cache.
+            packet['source']='Open-Meteo direct browser feed'
+            packet['transport']='BROWSER_DIRECT_RELAY'
+            packet['note']='Current Open-Meteo data fetched directly by the authenticated browser because server egress was rate-limited. Provider payload was parsed server-side but not independently re-fetched.'
         return packet
     except Exception as e:
         # Never invent live observations. Prefer a timestamp-preserving cached public packet;
@@ -366,6 +376,7 @@ def enrich_with_live(x, packet):
     d['weather_valid_time']=packet.get('valid_time')
     d['weather_error']=packet.get('error')
     d['weather_note']=packet.get('note')
+    d['weather_transport']=packet.get('transport') or 'SERVER'
     d['temperature_c']=packet.get('temperature_c')
     d['humidity']=packet.get('humidity')
     d['rainfall']=packet.get('rainfall_24h_mm')
@@ -999,6 +1010,46 @@ def live_location(location_id:int, force:bool=False, mode:Literal['live','replay
         raise HTTPException(404,"Location not found")
     packet=build_replay_packet(x) if mode=='replay' else fetch_live_weather(x, force=force)
     return enrich_with_live(x, packet)
+
+@app.post("/api/live/browser-relay/{location_id}", tags=["System"])
+def browser_relay_live(location_id:int, body:dict, role:str=Depends(resolve_role)):
+    # Read-only prototype fallback. Authentication is still required in deployed
+    # mode, but FIELD_OFFICER is intentionally allowed because this endpoint does
+    # not persist data or issue alerts.
+    if AUTH_REQUIRED and role == 'PUBLIC':
+        raise HTTPException(403,'Authenticated PRAHARI session required')
+    x=next((z for z in LOCATIONS if z['id']==location_id),None)
+    if not x:
+        raise HTTPException(404,'Location not found')
+    if str(body.get('provider') or '').upper() != 'OPEN_METEO' or not isinstance(body.get('payload'),dict):
+        raise HTTPException(400,'Valid OPEN_METEO provider payload required')
+    packet=fetch_live_weather(x, force=True, data_override=body['payload'])
+    result=enrich_with_live(x,packet)
+    result['assessment_limitations']=list(result.get('assessment_limitations') or []) + [
+        'Live weather was fetched directly by the authenticated browser because the hosting provider egress was throttled. The server parsed but did not independently re-fetch this provider response.'
+    ]
+    return result
+
+@app.post("/api/assessments/{location_id}/browser-relay", tags=["Assessments"])
+def record_browser_relay_assessment(location_id:int, body:dict, role:str=Depends(resolve_role)):
+    require_role(role,'OPERATOR')
+    x=next((z for z in LOCATIONS if z['id']==location_id),None)
+    if not x:
+        raise HTTPException(404,'Location not found')
+    if str(body.get('provider') or '').upper() != 'OPEN_METEO' or not isinstance(body.get('payload'),dict):
+        raise HTTPException(400,'Valid OPEN_METEO provider payload required')
+    packet=fetch_live_weather(x, force=True, data_override=body['payload'])
+    result=enrich_with_live(x,packet)
+    result['assessment_limitations']=list(result.get('assessment_limitations') or []) + [
+        'Recorded from an authenticated browser-relayed Open-Meteo response because the hosting provider egress was throttled. This transport fallback should be replaced by server-managed provider access for production warning operations.'
+    ]
+    assessment_id=_save_assessment(location_id,'live-browser-relay',result)
+    draft=None
+    if result.get('assessment_status')=='ASSESSED' and result.get('risk_level') in ('HIGH','CRITICAL'):
+        draft=create_alert(location_id,f"{x['name']}, {x['state']}",result['risk_level'],result.get('risk_percent') or 0,
+                           'assessment-live-browser-relay',dedupe_seconds=300)
+    return {'assessment_id':assessment_id,'assessment':result,'draft_advisory':localized_alert(draft,'en') if draft else None,
+            'note':'Browser-relayed live assessment recorded with explicit transport provenance.'}
 
 @app.get("/api/live/diagnostics/{location_id}", tags=["System"])
 def live_diagnostics(location_id:int, force:bool=True, role:str=Depends(resolve_role)):
