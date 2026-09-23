@@ -60,3 +60,15 @@ The Landslide4Sense-2022 baseline repository is MIT licensed.
 Copyright (c) 2022 Institute of Advanced Research in Artificial Intelligence
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of the software and associated documentation files, to deal in the Software without restriction, including use, copy, modification, merge, publication, distribution, sublicense, and/or sale, subject to retaining the copyright and permission notice. The software is provided without warranty. See the upstream LICENSE file for the complete notice.
+
+
+## Sentinel-2 Level-1C model-input path
+- **Catalog:** Element 84 Earth Search collection `sentinel-2-l1c`.
+- **Why L1C:** the Landslide4Sense benchmark contract includes Sentinel-2 B10 and omits B8A. Earth Search L1C exposes the cirrus/B10 asset, while the L2A visual-review path is kept separate.
+- **Use in PRAHARI:** B1-B12 (excluding B8A) are resampled to the 10 m PRAHARI analysis grid for experimental patch preparation.
+- **Boundary:** Earth Search scene availability and STAC scale metadata do not establish exact benchmark preprocessing parity.
+
+## Copernicus DEM GLO-30 fallback
+- **Catalog:** Element 84 Earth Search collection `cop-dem-glo-30`.
+- **Use in PRAHARI:** online terrain fallback when local ALOS-compatible terrain rasters are not configured. DEM is resampled to the analysis grid and slope is derived numerically.
+- **Important mismatch:** Landslide4Sense used ALOS PALSAR slope and DEM. Copernicus DEM-derived terrain is therefore labeled an experimental distribution mismatch rather than silently presented as equivalent.
