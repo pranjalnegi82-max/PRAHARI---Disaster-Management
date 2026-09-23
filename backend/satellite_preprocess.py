@@ -367,6 +367,17 @@ def _mask_from_rle(rle: list[list[int]]) -> np.ndarray:
     return flat.reshape(PATCH_SIZE,PATCH_SIZE)
 
 
+def _ring_area(coords) -> float:
+    if not coords or len(coords) < 3:
+        return 0.0
+    area=0.0
+    for i in range(len(coords)):
+        x1,y1=coords[i][0],coords[i][1]
+        x2,y2=coords[(i+1)%len(coords)][0],coords[(i+1)%len(coords)][1]
+        area += x1*y2 - x2*y1
+    return abs(area)*0.5
+
+
 def candidate_geojson(mask_rle: list[list[int]], meta: dict, *, min_pixels: int = 8) -> dict:
     if not GEO_AVAILABLE:
         raise RuntimeError("rasterio is required for polygonization.")
@@ -377,13 +388,17 @@ def candidate_geojson(mask_rle: list[list[int]], meta: dict, *, min_pixels: int 
     transform=Affine(*[float(x) for x in transform_vals])
     crs=meta.get("crs")
     geoms=[]
+    min_area_m2=float(min_pixels)*(PIXEL_SIZE_M**2)
     for geom,value in features.shapes(mask,mask=mask==1,transform=transform):
         if int(value)!=1:
             continue
-        # approximate component area using polygon bbox / pixel count is intentionally
-        # not fabricated; rasterio shapes already groups connected candidate pixels.
+        coords=(geom.get("coordinates") or [])
+        outer=coords[0] if geom.get("type")=="Polygon" and coords else []
+        area_m2=_ring_area(outer)
+        if area_m2 < min_area_m2:
+            continue
         g4326=transform_geom(crs,"EPSG:4326",geom,precision=7)
-        geoms.append({"type":"Feature","geometry":g4326,"properties":{"class":"candidate_landslide","review_status":"UNREVIEWED"}})
+        geoms.append({"type":"Feature","geometry":g4326,"properties":{"class":"candidate_landslide","review_status":"UNREVIEWED","area_m2":round(area_m2,1)}})
     return {
         "type":"FeatureCollection",
         "features":geoms,
@@ -391,6 +406,7 @@ def candidate_geojson(mask_rle: list[list[int]], meta: dict, *, min_pixels: int 
             "status":"MODEL_CANDIDATES_UNREVIEWED",
             "source_patch_id":meta.get("patch_id"),
             "model_scope":"post-event segmentation candidate polygons",
+            "minimum_component_pixels":min_pixels,
             "warning":"These polygons are model candidates, not verified landslides or public warnings."
         }
     }
