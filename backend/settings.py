@@ -69,7 +69,7 @@ _raw_origins = os.getenv(
 )
 ALLOWED_ORIGINS = [x.strip() for x in _raw_origins.split(",") if x.strip()]
 
-WEATHER_TIMEOUT_SECONDS = float(os.getenv("PRAHARI_WEATHER_TIMEOUT_SECONDS", "4"))
+WEATHER_TIMEOUT_SECONDS = float(os.getenv("PRAHARI_WEATHER_TIMEOUT_SECONDS", "12"))
 WEATHER_CACHE_TTL_SECONDS = int(os.getenv("PRAHARI_WEATHER_CACHE_TTL_SECONDS", "300"))
 WEATHER_STALE_MAX_SECONDS = int(os.getenv("PRAHARI_WEATHER_STALE_MAX_SECONDS", str(6 * 3600)))
 
