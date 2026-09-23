@@ -27,20 +27,12 @@ services:
       - key: PRAHARI_TWILIO_VALIDATE_SIGNATURE
         value: "true"
       - key: PRAHARI_OPERATOR_KEY
-        sync: false
+        generateValue: true
       - key: PRAHARI_REVIEWER_KEY
-        sync: false
+        generateValue: true
       - key: PRAHARI_ADMIN_KEY
         sync: false
       - key: PRAHARI_FIELD_OFFICERS_JSON
-        sync: false
-      - key: PRAHARI_TWILIO_ACCOUNT_SID
-        sync: false
-      - key: PRAHARI_TWILIO_AUTH_TOKEN
-        sync: false
-      - key: PRAHARI_TWILIO_SMS_FROM
-        sync: false
-      - key: PRAHARI_TWILIO_MESSAGING_SERVICE_SID
         sync: false
 
   - type: web
