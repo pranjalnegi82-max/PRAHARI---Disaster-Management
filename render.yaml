@@ -16,6 +16,8 @@ services:
         value: production
       - key: PRAHARI_AUTH_REQUIRED
         value: "true"
+      - key: PRAHARI_WEATHER_TIMEOUT_SECONDS
+        value: "12"
       - key: PRAHARI_ALLOWED_ORIGINS
         value: https://prahari-sih26001-pranjal.onrender.com
       - key: PRAHARI_PUBLIC_BASE_URL
