@@ -166,6 +166,25 @@ def _sum_indices(values, indices):
             pass
     return round(total, 1)
 
+def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
+    """Small retry wrapper for public weather APIs.
+
+    Render free instances can have transient DNS/connectivity delays after a cold
+    start. Retry only transport/HTTP failures; never replace missing live data
+    with invented observations.
+    """
+    last_error=None
+    for attempt in range(max(1, attempts)):
+        try:
+            req=UrlRequest(url, headers={'User-Agent':'PRAHARI-SIH26001/9.5 (+https://prahari-sih26001-pranjal.onrender.com)'})
+            with urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode('utf-8'))
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            last_error=exc
+            if attempt < attempts-1:
+                time.sleep(0.6 * (attempt+1))
+    raise last_error or RuntimeError('Weather provider request failed')
+
 def fetch_live_weather(x, force=False):
     now = int(time.time())
     cached = LIVE_WEATHER_CACHE.get(x['id'])
@@ -193,9 +212,7 @@ def fetch_live_weather(x, force=False):
     }
     url = 'https://api.open-meteo.com/v1/forecast?' + urlencode(params)
     try:
-        req = UrlRequest(url, headers={'User-Agent':'PRAHARI-SIH26001/7.0'})
-        with urlopen(req, timeout=WEATHER_TIMEOUT_SECONDS) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
+        data = _fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=3)
         current = data.get('current') or {}
         hourly = data.get('hourly') or {}
         times = hourly.get('time') or []
@@ -340,6 +357,8 @@ def enrich_with_live(x, packet):
     d['weather_source']=packet.get('source')
     d['weather_updated_at']=packet.get('updated_at')
     d['weather_valid_time']=packet.get('valid_time')
+    d['weather_error']=packet.get('error')
+    d['weather_note']=packet.get('note')
     d['temperature_c']=packet.get('temperature_c')
     d['humidity']=packet.get('humidity')
     d['rainfall']=packet.get('rainfall_24h_mm')
@@ -446,7 +465,7 @@ def live_locs(force=False, mode='live'):
     if LIVE_REGIONAL_CACHE['data'] is not None and not force and now-LIVE_REGIONAL_CACHE['ts'] < LIVE_TTL_SECONDS:
         return LIVE_REGIONAL_CACHE['data']
     packets={}
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=4) as ex:
         futures={ex.submit(fetch_live_weather,x,force):x for x in LOCATIONS}
         for f,x in futures.items():
             try: packets[x['id']]=f.result()
@@ -911,6 +930,28 @@ def live_location(location_id:int, force:bool=False, mode:Literal['live','replay
         raise HTTPException(404,"Location not found")
     packet=build_replay_packet(x) if mode=='replay' else fetch_live_weather(x, force=force)
     return enrich_with_live(x, packet)
+
+@app.get("/api/live/diagnostics/{location_id}", tags=["System"])
+def live_diagnostics(location_id:int, force:bool=True, role:str=Depends(resolve_role)):
+    require_role(role,'ADMIN')
+    x=next((z for z in LOCATIONS if z['id']==location_id),None)
+    if not x:
+        raise HTTPException(404,'Location not found')
+    packet=fetch_live_weather(x, force=force)
+    return {
+        'location_id':location_id,
+        'location':f"{x['name']}, {x['state']}",
+        'availability':packet.get('availability'),
+        'source':packet.get('source'),
+        'valid_time':packet.get('valid_time'),
+        'updated_at':packet.get('updated_at'),
+        'error':packet.get('error'),
+        'note':packet.get('note'),
+        'has_rainfall_24h':packet.get('rainfall_24h_mm') is not None,
+        'has_rainfall_72h':packet.get('antecedent_rainfall_72h_mm') is not None,
+        'has_soil_moisture':packet.get('soil_moisture_proxy_pct') is not None,
+        'provider':'Open-Meteo'
+    }
 
 
 def _save_assessment(location_id:int, mode:str, result:dict) -> int:
