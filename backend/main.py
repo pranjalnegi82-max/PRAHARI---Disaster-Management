@@ -97,6 +97,12 @@ DATA_CATALOG = {
         "freshness": "near-real-time imagery where available",
         "license_note": "Used as visual context only. PRAHARI v9 does not run a landslide detector on these tiles."
     },
+    "earth_search_s2": {
+        "name": "Element 84 Earth Search / Sentinel-2 L2A", "kind": "optical_satellite_scene_catalog", "status": "LIVE_SCENE_DISCOVERY",
+        "origin": "https://earth-search.aws.element84.com/v1", "coverage": "global Sentinel-2 archive",
+        "spatial_resolution": "10-20 m multispectral bands", "freshness": "catalog dependent; newest cloud-screened acquisition",
+        "license_note": "Scene metadata and COG asset links are discovered through Earth Search. Sentinel data terms/attribution apply. PRAHARI scene discovery is not itself landslide inference."
+    },
     "nasa_glc": {
         "name": "NASA Global Landslide Catalog", "kind": "historical_inventory", "status": "REFERENCE_NOT_BUNDLED",
         "origin": "https://data.nasa.gov/dataset/global-landslide-catalog-export", "coverage": "global reported rainfall-triggered events",
@@ -932,16 +938,144 @@ def _record_provider_status(message_sid:str,status:str,error_code:str|None=None,
 def satellite_packet(x):
     return {
         'location_id':x['id'],'location':f"{x['name']}, {x['state']}",'coordinates':{'lat':x['lat'],'lon':x['lon']},
-        'pipeline_status':'VISUAL_BASEMAP_ONLY','imagery_basemap':'NASA GIBS / Esri imagery when reachable',
-        'terrain_basemap':'OpenTopoMap when reachable','analysis_mode':'NO_SATELLITE_MODEL_INFERENCE',
+        'pipeline_status':'SCENE_DISCOVERY_IMPLEMENTED','imagery_basemap':'NASA GIBS / Esri imagery when reachable',
+        'terrain_basemap':'OpenTopoMap when reachable','analysis_mode':'SENTINEL2_SCENE_QA_PLUS_VISUAL_CONTEXT',
         'risk_level':x.get('risk_level','UNKNOWN'),'risk_percent':x.get('risk_percent'),
         'terrain_context':{'slope_deg':x.get('slope'),'elevation_m':x.get('elevation'),'ndvi_baseline':x.get('ndvi'),'source_state':'BASELINE_DEMO'},
-        'detection_module':{'name':'Landslide4Sense-compatible post-event segmentation','status':'ROADMAP','note':'No trained segmentation model or scene ingestion pipeline is bundled. Basemap imagery is not treated as model output.'},
+        'scene_discovery':{'provider':'Element 84 Earth Search','collection':'sentinel-2-l2a','status':'IMPLEMENTED',
+                           'note':'PRAHARI searches real Sentinel-2 L2A acquisitions and identifies recent/reference scene pairs using acquisition date and cloud metadata.'},
+        'detection_module':{'name':'Landslide4Sense-compatible post-event segmentation','status':'MODEL_NOT_CONFIGURED',
+                            'note':'Scene ingestion is now implemented. Automatic landslide masks remain disabled until trained weights and regional validation are supplied.'},
         'provenance':[
-            'Imagery tiles are visual geographic context only.',
-            'Bundled slope/elevation/NDVI attributes are prototype baseline context, not authoritative live EO analysis.',
-            'Post-event satellite landslide detection remains a separate roadmap capability based on Landslide4Sense-style semantic segmentation.'
+            'NASA/Esri imagery tiles remain visual geographic context only.',
+            'Sentinel-2 scene dates, cloud cover and asset links come from the live Earth Search STAC catalog.',
+            'Scene-pair readiness is not a landslide detection result.',
+            'Automatic post-event landslide segmentation remains a separate model stage based on Landslide4Sense-style semantic segmentation.'
         ]
+    }
+
+EARTH_SEARCH_STAC = "https://earth-search.aws.element84.com/v1"
+
+def _iso_utc(dt:datetime) -> str:
+    return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z')
+
+def _sentinel_scene_summary(item:dict) -> dict:
+    props=item.get('properties') or {}
+    links=item.get('links') or []
+    assets=item.get('assets') or {}
+    def link(rel):
+        row=next((x for x in links if x.get('rel')==rel and x.get('href')),None)
+        return row.get('href') if row else None
+    def asset_href(*names):
+        for name in names:
+            a=assets.get(name)
+            if isinstance(a,dict) and a.get('href'):
+                return a.get('href')
+        return None
+    return {
+        'id':item.get('id'),
+        'datetime':props.get('datetime'),
+        'cloud_cover_pct':props.get('eo:cloud_cover'),
+        'platform':props.get('platform'),
+        'mgrs_tile':props.get('grid:code') or props.get('mgrs:utm_zone') or props.get('s2:mgrs_tile'),
+        'thumbnail_url':link('thumbnail'),
+        'stac_url':link('self'),
+        'bbox':item.get('bbox'),
+        'assets':{
+            'visual':asset_href('visual'),
+            'red':asset_href('red','B04'),
+            'nir':asset_href('nir','nir08','B08'),
+            'swir16':asset_href('swir16','B11'),
+            'swir22':asset_href('swir22','B12'),
+            'scl':asset_href('scl','SCL')
+        }
+    }
+
+def _scene_dt(scene:dict):
+    try:
+        return datetime.fromisoformat(str(scene.get('datetime')).replace('Z','+00:00'))
+    except Exception:
+        return None
+
+def _choose_scene_pair(scenes:list[dict], min_gap_days:int=10):
+    valid=[x for x in scenes if _scene_dt(x)]
+    valid.sort(key=lambda x:_scene_dt(x), reverse=True)
+    if not valid:
+        return None
+    recent=valid[0]
+    rdt=_scene_dt(recent)
+    candidates=[x for x in valid[1:] if (rdt-_scene_dt(x)).days >= min_gap_days]
+    if not candidates:
+        return {'recent':recent,'reference':None,'days_between':None,'status':'REFERENCE_SCENE_NOT_FOUND'}
+    # Prefer a low-cloud reference within ~90 days while preserving temporal separation.
+    candidates.sort(key=lambda x:((x.get('cloud_cover_pct') if x.get('cloud_cover_pct') is not None else 999), abs((rdt-_scene_dt(x)).days-30)))
+    reference=candidates[0]
+    return {'recent':recent,'reference':reference,'days_between':(rdt-_scene_dt(reference)).days,'status':'PAIR_READY'}
+
+def search_sentinel2_scenes(x:dict, days:int=120, max_cloud:float=45.0, limit:int=12):
+    end=datetime.now(timezone.utc)
+    start=end-timedelta(days=days)
+    pad=0.15
+    payload={
+        'collections':['sentinel-2-l2a'],
+        'bbox':[x['lon']-pad,x['lat']-pad,x['lon']+pad,x['lat']+pad],
+        'datetime':f"{_iso_utc(start)}/{_iso_utc(end)}",
+        'query':{'eo:cloud_cover':{'lte':max_cloud}},
+        'limit':max(2,min(50,limit))
+    }
+    req=UrlRequest(
+        EARTH_SEARCH_STAC+'/search',
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type':'application/json','Accept':'application/geo+json','User-Agent':'PRAHARI-SIH26001/9.6'},
+        method='POST'
+    )
+    try:
+        with urlopen(req, timeout=12) as resp:
+            raw=json.loads(resp.read().decode('utf-8'))
+        scenes=[_sentinel_scene_summary(item) for item in (raw.get('features') or [])]
+        scenes.sort(key=lambda x:_scene_dt(x) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        pair=_choose_scene_pair(scenes)
+        return {
+            'status':'AVAILABLE' if scenes else 'NO_SCENES',
+            'provider':'Element 84 Earth Search',
+            'collection':'sentinel-2-l2a',
+            'location_id':x['id'],'location':f"{x['name']}, {x['state']}",
+            'searched_at':int(time.time()),'search_days':days,'max_cloud_pct':max_cloud,
+            'scene_count':len(scenes),'scenes':scenes,'pair':pair,
+            'analysis_status':'SCENE_PAIR_READY' if pair and pair.get('status')=='PAIR_READY' else 'SCENE_DISCOVERY_ONLY',
+            'segmentation_status':'MODEL_NOT_CONFIGURED',
+            'note':'Real Sentinel-2 scene discovery is active. Scene pairing and cloud metadata are quality-control steps, not a landslide detection result.'
+        }
+    except Exception as exc:
+        return {
+            'status':'SOURCE_UNAVAILABLE','provider':'Element 84 Earth Search','collection':'sentinel-2-l2a',
+            'location_id':x['id'],'location':f"{x['name']}, {x['state']}",'scene_count':0,'scenes':[],'pair':None,
+            'analysis_status':'UNAVAILABLE','segmentation_status':'MODEL_NOT_CONFIGURED',
+            'error':f'{type(exc).__name__}: {exc}',
+            'note':'Sentinel-2 catalog lookup failed. PRAHARI does not invent satellite scenes.'
+        }
+
+@app.get("/api/satellite/sentinel2/{location_id}", tags=["Satellite Intelligence"])
+def sentinel2_scenes(location_id:int, days:int=Query(120,ge=14,le=365), max_cloud:float=Query(45,ge=0,le=100), limit:int=Query(12,ge=2,le=30)):
+    x=next((z for z in LOCATIONS if z['id']==location_id),None)
+    if not x:
+        raise HTTPException(404,'Location not found')
+    return search_sentinel2_scenes(x,days=days,max_cloud=max_cloud,limit=limit)
+
+@app.get("/api/satellite/architecture", tags=["Satellite Intelligence"])
+def satellite_architecture():
+    return {
+        'post_event_detection':{
+            'status':'PARTIAL',
+            'implemented':['Sentinel-2 L2A scene discovery','cloud metadata QA','recent/reference scene pairing','real scene thumbnails/asset provenance'],
+            'pending':['trained Landslide4Sense-compatible segmentation weights','spectral/terrain preprocessing parity','NER validation','pixel-level landslide masks']
+        },
+        'susceptibility':{'status':'BASELINE_DEMO','note':'Current slope/elevation/NDVI context is seeded prototype data, not authoritative DEM-derived raster analysis.'},
+        'deformation_monitoring':{'status':'ROADMAP','note':'Sentinel-1/InSAR slope-deformation monitoring is intentionally separate from optical post-event detection.'},
+        'research_basis':{
+            'landslide4sense':'Official benchmark uses 12 Sentinel-2 multispectral bands plus slope and DEM at approximately 10 m pixels.',
+            'earth_search':'Earth Search provides STAC discovery and cloud-optimized Sentinel-2 L2A assets.'
+        }
     }
 
 @app.on_event("startup")
