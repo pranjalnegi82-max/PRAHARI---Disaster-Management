@@ -244,7 +244,7 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
 .sat-head-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .sat-overview-strip{
   display:grid;
-  grid-template-columns:repeat(5,minmax(0,1fr));
+  grid-template-columns:repeat(6,minmax(0,1fr));
   gap:10px;
   margin:14px 0 16px;
 }
