@@ -354,9 +354,10 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
 .sat-intel-focus .fine{font-size:12px}
 .sat-intel-focus .sat-pipeline{margin:0}
 @media(max-width:650px){
-  .sidebar{height:56px;padding:6px 12px}
+  .sidebar:not(.field-sidebar){height:56px;padding:6px 12px}
   .side-nav button{min-width:44px;min-height:44px;display:flex;justify-content:center;flex:1}
-  .topbar{top:56px;height:56px;padding:6px 10px;gap:8px;align-items:center}
+  .topbar:not(.field-topbar){top:56px;height:56px;padding:6px 10px;gap:8px;align-items:center}
+  .map-toolbar .segmented button{min-width:0;font-size:12px;padding:10px 6px;min-height:44px}
   .topbar .portal-identity{display:none}
   .top-actions{gap:4px}
   .top-actions .icon-btn,.top-actions .portal-logout{width:40px;height:40px;padding:0;flex:none}

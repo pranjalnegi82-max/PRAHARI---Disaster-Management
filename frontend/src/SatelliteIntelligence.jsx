@@ -102,7 +102,7 @@ export default function SatelliteIntelligence({ selected, searchScenes, SceneCar
       get('/api/satellite/model/status', { signal: c.signal }),
       get('/api/satellite/preprocess/status', { signal: c.signal }),
     ]);
-    if (c.signal.aborted) return;
+    if (c.signal.aborted) { requests.current.delete(c); return; }
     const [scene, m, p] = responses;
     setModel(m.status === 'fulfilled' ? m.value : { status: 'UNAVAILABLE', reason: m.reason.message });
     setPrep(p.status === 'fulfilled' ? p.value : { status: 'UNAVAILABLE', runtime_error: p.reason.message });
