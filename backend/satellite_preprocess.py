@@ -32,6 +32,7 @@ import math
 import os
 import time
 import uuid
+import base64
 import numpy as np
 
 EARTH_SEARCH = "https://earth-search.aws.element84.com/v1"
@@ -55,7 +56,7 @@ S2_BANDS = [
 ]
 
 BASE = Path(__file__).resolve().parent
-PATCH_DIR = Path(os.getenv("PRAHARI_SATELLITE_PATCH_DIR", str(BASE / "satellite_patches"))).expanduser()
+PATCH_DIR = Path(os.getenv("PRAHARI_SATELLITE_PATCH_DIR", "").strip() or str(BASE / "satellite_patches")).expanduser()
 ALOS_DEM_PATH = os.getenv("PRAHARI_L4S_ALOS_DEM_PATH", "").strip()
 ALOS_SLOPE_PATH = os.getenv("PRAHARI_L4S_ALOS_SLOPE_PATH", "").strip()
 ALLOW_EXPERIMENTAL = os.getenv("PRAHARI_L4S_ALLOW_EXPERIMENTAL_PREPROCESS", "false").strip().lower() in {"1","true","yes","on"}
@@ -63,6 +64,10 @@ ALLOW_EXPERIMENTAL = os.getenv("PRAHARI_L4S_ALLOW_EXPERIMENTAL_PREPROCESS", "fal
 try:
     import rasterio
     from rasterio import features
+    from rasterio.vrt import WarpedVRT
+    from rasterio.io import MemoryFile
+    from rasterio.transform import array_bounds, from_bounds
+    from rasterio.warp import transform_bounds
     from rasterio.transform import Affine
     from rasterio.warp import reproject, Resampling, transform_geom
     from pyproj import CRS, Transformer
@@ -81,10 +86,62 @@ except Exception as exc:
     GEO_ERROR = f"{type(exc).__name__}: {exc}"
 
 
+INPUT_PROFILE_PATH = os.getenv("PRAHARI_L4S_INPUT_PROFILE", "").strip()
+CHANNEL_ORDER = [band for band, _ in S2_BANDS] + ["SLOPE", "DEM"]
+
+
+def input_profile() -> dict:
+    if not INPUT_PROFILE_PATH:
+        raise RuntimeError("A training-derived input profile is required for live inference. See SATELLITE_SETUP.md.")
+    try:
+        profile = json.loads(Path(INPUT_PROFILE_PATH).expanduser().read_text())
+        if not isinstance(profile, dict) or profile.get("channel_order") != CHANNEL_ORDER:
+            raise ValueError("Input profile channel order must match B1..B12, SLOPE, DEM.")
+        for key in ("scales", "offsets"):
+            values = np.asarray(profile.get(key), dtype=np.float64)
+            if values.shape != (14,) or not np.isfinite(values).all():
+                raise ValueError(f"Input profile {key} must contain 14 finite values.")
+            if key == "scales" and np.any(values == 0):
+                raise ValueError("Input profile scales must be nonzero.")
+        sha = profile.get("checkpoint_sha256", "")
+        if not isinstance(sha, str) or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
+            raise ValueError("Input profile must specify the checkpoint SHA-256.")
+        if not isinstance(profile.get("provenance"), str) or not profile["provenance"].strip():
+            raise ValueError("Document the input profile's training provenance.")
+        if profile.get("terrain_source") not in {"ALOS_LOCAL_SLOPE_DEM", "ALOS_LOCAL_DEM_DERIVED_SLOPE", "COPERNICUS_DEM_GLO30_DERIVED_SLOPE"}:
+            raise ValueError("Input profile must specify the training terrain source.")
+        return profile
+    except (OSError, ValueError, TypeError) as exc:
+        raise RuntimeError(f"Input profile is unavailable or invalid: {exc}") from exc
+
+
+def model_input(patch: np.ndarray, meta: dict, checkpoint_sha256: str) -> np.ndarray:
+    if not ALLOW_EXPERIMENTAL:
+        raise RuntimeError("Live inference requires PRAHARI_L4S_ALLOW_EXPERIMENTAL_PREPROCESS=true.")
+    profile = input_profile()
+    if profile["checkpoint_sha256"] != checkpoint_sha256:
+        raise RuntimeError("The input profile belongs to a different model checkpoint.")
+    if profile["terrain_source"] != meta["terrain"]["source"]:
+        raise RuntimeError("The prepared terrain does not match the model input profile.")
+    result = np.asarray(patch, dtype=np.float32) * np.asarray(profile["scales"], dtype=np.float32) + np.asarray(profile["offsets"], dtype=np.float32)
+    if not np.isfinite(result).all():
+        raise ValueError("Transformed model input contains nonfinite values.")
+    meta["input_profile"] = profile
+    return result
+
+
 def status() -> dict[str, Any]:
     alos_dem = bool(ALOS_DEM_PATH and Path(ALOS_DEM_PATH).exists())
     alos_slope = bool(ALOS_SLOPE_PATH and Path(ALOS_SLOPE_PATH).exists())
+    profile_error = None
+    try:
+        input_profile()
+    except RuntimeError as exc:
+        profile_error = str(exc)
     return {
+        "input_profile_configured": profile_error is None,
+        "input_profile_error": profile_error,
+        "live_inference_ready": GEO_AVAILABLE and ALLOW_EXPERIMENTAL and profile_error is None,
         "status": "READY" if GEO_AVAILABLE else "NOT_CONFIGURED",
         "geospatial_runtime": GEO_AVAILABLE,
         "runtime_error": GEO_ERROR,
@@ -149,7 +206,7 @@ def find_l1c_scene(lat: float, lon: float, *, days: int = 120, max_cloud: float 
         raise RuntimeError("No Sentinel-2 L1C scene with all B1-B12 assets was found for this location/window.")
     usable.sort(key=lambda item: (
         _scene_dt(item),
-        -float((item.get("properties") or {}).get("eo:cloud_cover") or 999.0)
+        -float((item.get("properties") or {}).get("eo:cloud_cover") if (item.get("properties") or {}).get("eo:cloud_cover") is not None else 999.0)
     ), reverse=True)
     return usable[0]
 
@@ -192,34 +249,24 @@ def _href(asset: dict) -> str:
 
 
 def _read_to_grid(href: str, target_crs, target_transform, *, resampling, scale: float = 1.0, offset: float = 0.0) -> tuple[np.ndarray,float]:
-    dst=np.full((PATCH_SIZE,PATCH_SIZE), np.nan, dtype=np.float32)
-    env_kwargs={
-        "GDAL_DISABLE_READDIR_ON_OPEN":"EMPTY_DIR",
-        "CPL_VSIL_CURL_ALLOWED_EXTENSIONS":".tif,.tiff,.jp2,.TIF,.TIFF,.JP2",
-        "GDAL_HTTP_MULTIRANGE":"YES",
-        "AWS_NO_SIGN_REQUEST":"YES",
+    env_kwargs = {
+        "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+        "CPL_VSIL_CURL_ALLOWED_EXTENSIONS": ".tif,.tiff,.jp2,.TIF,.TIFF,.JP2",
+        "GDAL_HTTP_MULTIRANGE": "YES", "AWS_NO_SIGN_REQUEST": "YES",
+        "GDAL_HTTP_CONNECTTIMEOUT": "10", "GDAL_HTTP_TIMEOUT": "30", "GDAL_HTTP_MAX_RETRY": "1",
     }
     with rasterio.Env(**env_kwargs):
         with rasterio.open(href) as src:
-            reproject(
-                source=rasterio.band(src,1),
-                destination=dst,
-                src_transform=src.transform,
-                src_crs=src.crs,
-                src_nodata=src.nodata,
-                dst_transform=target_transform,
-                dst_crs=target_crs,
-                dst_nodata=np.nan,
-                resampling=resampling,
-            )
+            # Restrict reads to the analysis grid rather than reprojecting whole scenes.
+            with WarpedVRT(src, crs=target_crs, transform=target_transform,
+                           width=PATCH_SIZE, height=PATCH_SIZE, dtype="float32",
+                           nodata=np.nan, resampling=resampling) as vrt:
+                dst = vrt.read(1, masked=True).filled(np.nan)
     dst = dst.astype(np.float32) * np.float32(scale) + np.float32(offset)
-    invalid = ~np.isfinite(dst)
-    invalid_pct = float(invalid.mean()*100.0)
-    if invalid.all():
-        raise RuntimeError(f"Raster asset produced no valid pixels: {href}")
-    if invalid.any():
-        fill=float(np.nanmedian(dst))
-        dst[invalid]=fill
+    invalid_pct = float((~np.isfinite(dst)).mean() * 100)
+    if invalid_pct == 100:
+        raise RuntimeError("Raster asset produced no valid pixels for the analysis area.")
+    # Preserve missing pixels so preparation can refuse incomplete coverage.
     return dst, invalid_pct
 
 
@@ -274,15 +321,18 @@ def _terrain(lat: float, lon: float, target_crs, target_transform):
     }
 
 
-def prepare_patch(lat: float, lon: float, *, days: int = 120, max_cloud: float = 35.0, persist: bool = True) -> tuple[np.ndarray,dict]:
+def prepare_patch(lat: float, lon: float, *, days: int = 120, max_cloud: float = 35.0, persist: bool = True, progress=None) -> tuple[np.ndarray,dict]:
     if not GEO_AVAILABLE:
         raise RuntimeError("Geospatial preprocessing runtime is unavailable. Install rasterio and pyproj.")
+    progress = progress or (lambda stage: None)
+    progress("Finding a complete Sentinel-2 L1C scene")
     scene=find_l1c_scene(lat,lon,days=days,max_cloud=max_cloud)
     target_crs,target_transform=target_grid(lat,lon)
     assets=scene.get("assets") or {}
     channels=[]
     band_meta=[]
     for band_name,asset_name in S2_BANDS:
+        progress(f"Reading Sentinel-2 band {band_name}")
         asset=assets.get(asset_name)
         if not asset:
             raise RuntimeError(f"Sentinel-2 scene is missing required asset {asset_name} ({band_name}).")
@@ -294,9 +344,12 @@ def prepare_patch(lat: float, lon: float, *, days: int = 120, max_cloud: float =
             "missing_pct":round(missing,3),"href":_href(asset)
         })
 
+    progress("Preparing terrain channels")
     slope,dem,terrain_meta=_terrain(lat,lon,target_crs,target_transform)
     channels.extend([slope,dem])
     patch=np.stack(channels,axis=-1).astype(np.float32)
+    if not np.isfinite(patch).all():
+        raise RuntimeError("Scene or terrain coverage is incomplete. Missing pixels will not be classified.")
 
     transform_list=[target_transform.a,target_transform.b,target_transform.c,target_transform.d,target_transform.e,target_transform.f]
     props=scene.get("properties") or {}
@@ -318,6 +371,7 @@ def prepare_patch(lat: float, lon: float, *, days: int = 120, max_cloud: float =
         "sentinel_bands":band_meta,
         "terrain":terrain_meta,
         "channel_order":[x[0] for x in S2_BANDS]+["SLOPE","DEM"],
+        "quality": {"complete_coverage": True, "cloud_check": "SCENE_METADATA_ONLY", "pixel_cloud_mask": "NOT_APPLIED"},
         "created_at":datetime.now(timezone.utc).isoformat(),
         "preprocessing_status":"EXPERIMENTAL_LIVE_PATCH",
         "dataset_parity":"NOT_VERIFIED",
@@ -344,6 +398,9 @@ def prepare_patch(lat: float, lon: float, *, days: int = 120, max_cloud: float =
 def patch_summary(meta: dict) -> dict:
     return {
         "patch_id":meta.get("patch_id"),
+        "created_at":meta.get("created_at"),
+        "quality":meta.get("quality"),
+        "input_profile":meta.get("input_profile"),
         "shape":meta.get("shape"),
         "center":meta.get("center"),
         "pixel_size_m":meta.get("pixel_size_m"),
@@ -358,13 +415,38 @@ def patch_summary(meta: dict) -> dict:
 
 
 def _mask_from_rle(rle: list[list[int]]) -> np.ndarray:
-    flat=np.zeros(PATCH_SIZE*PATCH_SIZE,dtype=np.uint8)
+    flat = np.zeros(PATCH_SIZE * PATCH_SIZE, dtype=np.uint8)
+    cursor = 0
     for row in rle or []:
-        if len(row)!=3:
-            continue
-        start,length,value=(int(row[0]),int(row[1]),int(row[2]))
-        flat[start:start+length]=value
-    return flat.reshape(PATCH_SIZE,PATCH_SIZE)
+        if not isinstance(row, (list, tuple)) or len(row) != 3 or any(type(v) is not int for v in row):
+            raise ValueError("Invalid mask RLE.")
+        start, length, value = row
+        if start != cursor or length <= 0 or value not in (0, 1) or start + length > flat.size:
+            raise ValueError("Mask RLE must cover the image contiguously without overlap.")
+        flat[start:start + length] = value
+        cursor += length
+    if cursor != flat.size:
+        raise ValueError("Mask RLE does not cover the complete image.")
+    return flat.reshape(PATCH_SIZE, PATCH_SIZE)
+
+
+def mask_overlay(mask_rle: list[list[int]], meta: dict) -> dict:
+    mask = _mask_from_rle(mask_rle)
+    transform = Affine(*meta["transform"])
+    west, south, east, north = transform_bounds(meta["crs"], "EPSG:4326", *array_bounds(PATCH_SIZE, PATCH_SIZE, transform))
+    dest_transform = from_bounds(west, south, east, north, PATCH_SIZE, PATCH_SIZE)
+    geographic = np.zeros_like(mask)
+    reproject(mask, geographic, src_transform=transform, src_crs=meta["crs"],
+              dst_transform=dest_transform, dst_crs="EPSG:4326", resampling=Resampling.nearest)
+    rgba = np.zeros((4, PATCH_SIZE, PATCH_SIZE), dtype=np.uint8)
+    rgba[0], rgba[1], rgba[2] = 220, 55, 40
+    rgba[3] = geographic * 170
+    with MemoryFile() as memory:
+        with memory.open(driver="PNG", width=PATCH_SIZE, height=PATCH_SIZE, count=4, dtype="uint8") as ds:
+            ds.write(rgba)
+        content = memory.read()
+    return {"image_url": "data:image/png;base64," + base64.b64encode(content).decode("ascii"),
+            "bounds": [[south, west], [north, east]], "crs": "EPSG:4326"}
 
 
 def _ring_area(coords) -> float:
@@ -378,10 +460,14 @@ def _ring_area(coords) -> float:
     return abs(area)*0.5
 
 
-def candidate_geojson(mask_rle: list[list[int]], meta: dict, *, min_pixels: int = 8) -> dict:
+def candidate_geojson(mask_rle: list[list[int]], meta: dict, *, min_pixels: int = 8, scores: np.ndarray | None = None) -> dict:
     if not GEO_AVAILABLE:
         raise RuntimeError("rasterio is required for polygonization.")
     mask=_mask_from_rle(mask_rle)
+    if scores is not None:
+        scores = np.asarray(scores, dtype=np.float32)
+        if scores.shape != mask.shape or not np.isfinite(scores).all() or np.any((scores < 0) | (scores > 1)):
+            raise ValueError("Model score grid is invalid.")
     transform_vals=meta.get("transform")
     if not transform_vals or len(transform_vals)!=6:
         raise ValueError("Patch metadata has no valid affine transform.")
@@ -394,11 +480,18 @@ def candidate_geojson(mask_rle: list[list[int]], meta: dict, *, min_pixels: int 
             continue
         coords=(geom.get("coordinates") or [])
         outer=coords[0] if geom.get("type")=="Polygon" and coords else []
-        area_m2=_ring_area(outer)
+        area_m2=max(0.0, _ring_area(outer) - sum(_ring_area(hole) for hole in coords[1:]))
         if area_m2 < min_area_m2:
             continue
         g4326=transform_geom(crs,"EPSG:4326",geom,precision=7)
-        geoms.append({"type":"Feature","geometry":g4326,"properties":{"class":"candidate_landslide","review_status":"UNREVIEWED","area_m2":round(area_m2,1)}})
+        component = features.geometry_mask([geom], out_shape=mask.shape, transform=transform, invert=True)
+        mean_score = round(float(scores[component].mean() * 100), 3) if scores is not None else None
+        geoms.append({"type":"Feature","geometry":g4326,"properties":{
+            "candidate_id": len(geoms) + 1, "class":"candidate_landslide", "review_status":"UNREVIEWED",
+            "area_m2":round(area_m2,1), "mean_softmax_score_pct":mean_score,
+            "source_patch_id":meta.get("patch_id"), "scene_id":meta.get("scene", {}).get("id"),
+            "acquired_at":meta.get("scene", {}).get("datetime"),
+        }})
     return {
         "type":"FeatureCollection",
         "features":geoms,
@@ -407,6 +500,7 @@ def candidate_geojson(mask_rle: list[list[int]], meta: dict, *, min_pixels: int 
             "source_patch_id":meta.get("patch_id"),
             "model_scope":"post-event segmentation candidate polygons",
             "minimum_component_pixels":min_pixels,
+            "total_area_m2":round(sum(f["properties"]["area_m2"] for f in geoms), 1),
             "warning":"These polygons are model candidates, not verified landslides or public warnings."
         }
     }
