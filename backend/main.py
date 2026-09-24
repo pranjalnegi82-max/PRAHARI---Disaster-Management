@@ -1053,14 +1053,14 @@ def search_sentinel2_scenes(x:dict, days:int=120, max_cloud:float=45.0, limit:in
             'searched_at':int(time.time()),'search_days':days,'max_cloud_pct':max_cloud,
             'scene_count':len(scenes),'scenes':scenes,'pair':pair,
             'analysis_status':'SCENE_PAIR_READY' if pair and pair.get('status')=='PAIR_READY' else 'SCENE_DISCOVERY_ONLY',
-            'segmentation_status':'MODEL_NOT_CONFIGURED',
+            'segmentation_status':'CHECK_MODEL_STATUS_ENDPOINT',
             'note':'Real Sentinel-2 scene discovery is active. Scene pairing and cloud metadata are quality-control steps, not a landslide detection result.'
         }
     except Exception as exc:
         return {
             'status':'SOURCE_UNAVAILABLE','provider':'Element 84 Earth Search','collection':'sentinel-2-l2a',
             'location_id':x['id'],'location':f"{x['name']}, {x['state']}",'scene_count':0,'scenes':[],'pair':None,
-            'analysis_status':'UNAVAILABLE','segmentation_status':'MODEL_NOT_CONFIGURED',
+            'analysis_status':'UNAVAILABLE','segmentation_status':'CHECK_MODEL_STATUS_ENDPOINT',
             'error':f'{type(exc).__name__}: {exc}',
             'note':'Sentinel-2 catalog lookup failed. PRAHARI does not invent satellite scenes.'
         }
@@ -1076,9 +1076,14 @@ def sentinel2_scenes(location_id:int, days:int=Query(120,ge=14,le=365), max_clou
 def satellite_architecture():
     return {
         'post_event_detection':{
-            'status':'PARTIAL',
-            'implemented':['Sentinel-2 L2A scene discovery','cloud metadata QA','recent/reference scene pairing','real scene thumbnails/asset provenance'],
-            'pending':['trained Landslide4Sense-compatible segmentation weights','spectral/terrain preprocessing parity','NER validation','pixel-level landslide masks']
+            'status':'EXPERIMENTAL_INTEGRATION',
+            'implemented':['Sentinel-2 L2A scene discovery','cloud metadata QA','visual scene pairing',
+                           'live L1C/terrain patch preparation','verified-checkpoint inference adapter',
+                           'background jobs','pixel masks and unreviewed candidate polygons'],
+            'requires_configuration':['trained compatible weights','matching training-derived input profile'],
+            'pending':['preprocessing parity verification','regional accuracy validation','human review of candidates'],
+            'model_status_endpoint':'/api/satellite/model/status',
+            'preprocess_status_endpoint':'/api/satellite/preprocess/status'
         },
         'susceptibility':{'status':'BASELINE_DEMO','note':'Current slope/elevation/NDVI context is seeded prototype data, not authoritative DEM-derived raster analysis.'},
         'deformation_monitoring':{'status':'ROADMAP','note':'Sentinel-1/InSAR slope-deformation monitoring is intentionally separate from optical post-event detection.'},

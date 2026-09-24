@@ -546,7 +546,7 @@ async function browserSentinel2Search(location,{days=120,maxCloud=45,limit=12,si
     location_id:location.id,location:`${location.name}, ${location.state}`,searched_at:Date.now()/1000,
     search_days:days,max_cloud_pct:maxCloud,scene_count:scenes.length,scenes,pair,
     analysis_status:pair?.status==='PAIR_READY'?'SCENE_PAIR_READY':'SCENE_DISCOVERY_ONLY',
-    segmentation_status:'MODEL_NOT_CONFIGURED',transport:'BROWSER_DIRECT_STAC',
+    segmentation_status:'CHECK_MODEL_STATUS_ENDPOINT',transport:'BROWSER_DIRECT_STAC',
     note:'Real Sentinel-2 scene metadata fetched directly from Earth Search. Scene pairing is quality control, not a landslide detection result.'
   };
 }
