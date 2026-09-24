@@ -72,3 +72,6 @@ Then verify:
 5. Field report submission.
 6. Alert lifecycle.
 7. SMS preview before enabling real delivery.
+## Experimental satellite inference
+
+See [SATELLITE_SETUP.md](SATELLITE_SETUP.md) for verified checkpoint loading, training-derived input profiles, optional separate inference hosting, and job limitations. The existing Blueprint omits PyTorch and does not provision an inference worker. Keep API process count at one with the current in-memory job store. This change does not deploy or alter any live Render service.

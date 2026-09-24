@@ -18,3 +18,6 @@ For the optional Landslide4Sense-compatible baseline adapter:
 The adapter expects the official benchmark input contract: a 128×128×14 float array containing Sentinel-2 B1–B12, slope, and DEM using the benchmark preprocessing statistics.
 
 Do not treat the competition validation score as Northeast India operational accuracy. Live-scene preprocessing and regional validation are separate requirements.
+## Verified model setup
+
+Use [SATELLITE_SETUP.md](../../SATELLITE_SETUP.md) for the current setup and input contract. Readiness now requires checkpoint loading and a finite forward pass. Live patches also need a matching training-derived input profile; raw DEM values must not be fed directly into benchmark normalization. No trained checkpoint is bundled. The inherited U-Net architecture is covered by [L4S_LICENSE.txt](L4S_LICENSE.txt).

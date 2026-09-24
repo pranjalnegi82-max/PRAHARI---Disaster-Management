@@ -66,7 +66,14 @@ async function run() {
     assert.equal(await page.getByRole('button', { name: 'Run segmentation', exact: true }).isDisabled(), true);
     async function noOverflow(width) {
       await page.setViewportSize({ width, height: 844 });
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `Horizontal overflow at ${width}px`);
+      const overflow = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth,
+        elements: [...document.querySelectorAll('body *')].filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.right > innerWidth + 1 || r.left < -1); })
+          .slice(0, 25).map(el => ({ tag: el.tagName, cls: el.className, text: el.textContent.slice(0, 80), left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right })) }));
+      if (overflow.scrollWidth > width + 1) {
+        await page.screenshot({ path: path.join(out, `overflow-${width}-SYNTHETIC.png`), fullPage: true });
+        console.error(JSON.stringify(overflow));
+      }
+      assert.equal(overflow.scrollWidth <= width + 1, true, `Horizontal overflow at ${width}px`);
     }
     await noOverflow(320); await noOverflow(390);
     await page.screenshot({ path: path.join(out, 'mobile-unavailable.png'), fullPage: true });
