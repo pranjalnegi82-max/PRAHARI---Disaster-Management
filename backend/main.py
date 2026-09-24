@@ -16,6 +16,11 @@ import uuid
 import csv
 import io
 import numpy as np
+from collections import OrderedDict
+from threading import Lock
+from copy import deepcopy
+from starlette.concurrency import run_in_threadpool
+import satellite_jobs
 from urllib.parse import urlencode
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import HTTPError, URLError
@@ -29,8 +34,10 @@ from settings import (ALLOWED_ORIGINS, AUTH_REQUIRED, APP_ENV, ADMIN_KEY, WEATHE
                       FIELD_OFFICERS_CONFIG_ERROR, ENV_SOURCE)
 from auth import resolve_role, require_role, field_officer_for_key
 from risk_baseline import assess as baseline_assess, VERSION as BASELINE_VERSION
-from satellite_l4s import status as l4s_status, infer_patch as l4s_infer_patch
-from satellite_preprocess import status as satprep_status, prepare_patch as satprep_prepare_patch, patch_summary as satprep_patch_summary, candidate_geojson as satprep_candidate_geojson
+from satellite_engine import status as l4s_status, infer_patch as l4s_infer_patch
+from satellite_preprocess import (status as satprep_status, prepare_patch as satprep_prepare_patch,
+                                  patch_summary as satprep_patch_summary, candidate_geojson as satprep_candidate_geojson,
+                                  model_input as satprep_model_input, mask_overlay as satprep_mask_overlay)
 from notifications import (
     config_status as notification_config_status, normalize_e164, send as send_notification,
     fetch_status as fetch_notification_status, validate_signature as validate_twilio_signature,
@@ -947,8 +954,8 @@ def satellite_packet(x):
         'terrain_context':{'slope_deg':x.get('slope'),'elevation_m':x.get('elevation'),'ndvi_baseline':x.get('ndvi'),'source_state':'BASELINE_DEMO'},
         'scene_discovery':{'provider':'Element 84 Earth Search','collection':'sentinel-2-l2a','status':'IMPLEMENTED',
                            'note':'PRAHARI searches real Sentinel-2 L2A acquisitions and identifies recent/reference scene pairs using acquisition date and cloud metadata.'},
-        'detection_module':{'name':'Landslide4Sense-compatible post-event segmentation','status':'MODEL_NOT_CONFIGURED',
-                            'note':'Scene ingestion is now implemented. Automatic landslide masks remain disabled until trained weights and regional validation are supplied.'},
+        'detection_module':{'name':'Landslide4Sense-compatible post-event segmentation','status':'CHECK_MODEL_STATUS_ENDPOINT',
+                            'note':'Read /api/satellite/model/status for verified model readiness. Any output is experimental and requires human review.'},
         'provenance':[
             'NASA/Esri imagery tiles remain visual geographic context only.',
             'Sentinel-2 scene dates, cloud cover and asset links come from the live Earth Search STAC catalog.',
@@ -1046,14 +1053,14 @@ def search_sentinel2_scenes(x:dict, days:int=120, max_cloud:float=45.0, limit:in
             'searched_at':int(time.time()),'search_days':days,'max_cloud_pct':max_cloud,
             'scene_count':len(scenes),'scenes':scenes,'pair':pair,
             'analysis_status':'SCENE_PAIR_READY' if pair and pair.get('status')=='PAIR_READY' else 'SCENE_DISCOVERY_ONLY',
-            'segmentation_status':'MODEL_NOT_CONFIGURED',
+            'segmentation_status':'CHECK_MODEL_STATUS_ENDPOINT',
             'note':'Real Sentinel-2 scene discovery is active. Scene pairing and cloud metadata are quality-control steps, not a landslide detection result.'
         }
     except Exception as exc:
         return {
             'status':'SOURCE_UNAVAILABLE','provider':'Element 84 Earth Search','collection':'sentinel-2-l2a',
             'location_id':x['id'],'location':f"{x['name']}, {x['state']}",'scene_count':0,'scenes':[],'pair':None,
-            'analysis_status':'UNAVAILABLE','segmentation_status':'MODEL_NOT_CONFIGURED',
+            'analysis_status':'UNAVAILABLE','segmentation_status':'CHECK_MODEL_STATUS_ENDPOINT',
             'error':f'{type(exc).__name__}: {exc}',
             'note':'Sentinel-2 catalog lookup failed. PRAHARI does not invent satellite scenes.'
         }
@@ -1069,9 +1076,14 @@ def sentinel2_scenes(location_id:int, days:int=Query(120,ge=14,le=365), max_clou
 def satellite_architecture():
     return {
         'post_event_detection':{
-            'status':'PARTIAL',
-            'implemented':['Sentinel-2 L2A scene discovery','cloud metadata QA','recent/reference scene pairing','real scene thumbnails/asset provenance'],
-            'pending':['trained Landslide4Sense-compatible segmentation weights','spectral/terrain preprocessing parity','NER validation','pixel-level landslide masks']
+            'status':'EXPERIMENTAL_INTEGRATION',
+            'implemented':['Sentinel-2 L2A scene discovery','cloud metadata QA','visual scene pairing',
+                           'live L1C/terrain patch preparation','verified-checkpoint inference adapter',
+                           'background jobs','pixel masks and unreviewed candidate polygons'],
+            'requires_configuration':['trained compatible weights','matching training-derived input profile'],
+            'pending':['preprocessing parity verification','regional accuracy validation','human review of candidates'],
+            'model_status_endpoint':'/api/satellite/model/status',
+            'preprocess_status_endpoint':'/api/satellite/preprocess/status'
         },
         'susceptibility':{'status':'BASELINE_DEMO','note':'Current slope/elevation/NDVI context is seeded prototype data, not authoritative DEM-derived raster analysis.'},
         'deformation_monitoring':{'status':'ROADMAP','note':'Sentinel-1/InSAR slope-deformation monitoring is intentionally separate from optical post-event detection.'},
@@ -1094,88 +1106,153 @@ def satellite_preprocess_status(role:str=Depends(resolve_role)):
         raise HTTPException(403,'Authenticated PRAHARI session required')
     return satprep_status()
 
-@app.post("/api/satellite/preprocess/{location_id}", tags=["Satellite Intelligence"])
-def satellite_prepare_location_patch(
-    location_id:int,
-    days:int=Query(120,ge=14,le=365),
-    max_cloud:float=Query(35,ge=0,le=100),
-    confirm_experimental:bool=False,
-    role:str=Depends(resolve_role)
-):
-    require_role(role,'ADMIN')
-    if not confirm_experimental:
-        raise HTTPException(400,'Set confirm_experimental=true after reviewing the preprocessing limitations.')
-    x=next((z for z in LOCATIONS if z['id']==location_id),None)
-    if not x:
-        raise HTTPException(404,'Location not found')
+_SATELLITE_LOCK = Lock()
+_SATELLITE_PATCHES = OrderedDict()
+
+
+def _satellite_work(location_id, operation, *, days=120, max_cloud=35, patch_id=None, progress=None):
+    if not _SATELLITE_LOCK.acquire(blocking=False):
+        raise RuntimeError("Satellite processing is busy. Try again when the current operation completes.")
     try:
-        _,meta=satprep_prepare_patch(x['lat'],x['lon'],days=days,max_cloud=max_cloud,persist=True)
-        out=satprep_patch_summary(meta)
-        out['location_id']=location_id
-        out['location']=f"{x['name']}, {x['state']}"
-        out['status']='PATCH_READY'
-        out['note']='A live 128x128x14 research patch was prepared. Dataset parity is not verified; do not treat this as a detection result.'
-        return out
+        return _satellite_process(location_id, operation, days=days, max_cloud=max_cloud, patch_id=patch_id, progress=progress)
+    finally:
+        _SATELLITE_LOCK.release()
+
+
+def _satellite_process(location_id, operation, *, days, max_cloud, patch_id, progress):
+    progress = progress or (lambda stage: None)
+    location = next((row for row in LOCATIONS if row["id"] == location_id), None)
+    if not location:
+        raise ValueError("Location not found.")
+    model = None
+    if operation == "infer":
+        progress("Checking model and input configuration")
+        model = l4s_status()
+        if model.get("status") != "READY" or model.get("verified") is not True:
+            raise RuntimeError(model.get("reason") or "Model is not verified and ready.")
+        prep = satprep_status()
+        if not prep.get("live_inference_ready"):
+            raise RuntimeError(prep.get("input_profile_error") or "Enable experimental preprocessing after reviewing SATELLITE_SETUP.md.")
+        if prep.get("profile_checkpoint_sha256") != model.get("checkpoint_sha256"):
+            raise RuntimeError("The input profile belongs to a different model checkpoint.")
+    now = time.time()
+    for key, value in list(_SATELLITE_PATCHES.items()):
+        if now - value["created_at"] > 3600:
+            del _SATELLITE_PATCHES[key]
+    if patch_id:
+        cached = _SATELLITE_PATCHES.get(patch_id)
+        if not cached or cached["location_id"] != location_id:
+            raise ValueError("Prepared patch expired or belongs to another location. Prepare it again.")
+        patch, meta = cached["patch"], deepcopy(cached["meta"])
+        progress("Reusing prepared patch")
+    else:
+        patch, meta = satprep_prepare_patch(location["lat"], location["lon"], days=days, max_cloud=max_cloud, persist=False, progress=progress)
+        _SATELLITE_PATCHES[meta["patch_id"]] = {"patch": patch, "meta": deepcopy(meta), "location_id": location_id, "created_at": time.time()}
+        while len(_SATELLITE_PATCHES) > 8:
+            _SATELLITE_PATCHES.popitem(last=False)
+    label = f"{location['name']}, {location['state']}"
+    if operation == "prepare":
+        return {**satprep_patch_summary(meta), "status": "PATCH_READY", "location_id": location_id, "location": label,
+                "note": "Research input prepared. This is not a detection result."}
+    progress("Running experimental segmentation")
+    prepared = satprep_model_input(patch, meta, model["checkpoint_sha256"])
+    inference = l4s_infer_patch(prepared)
+    if inference.get("checkpoint_sha256") != model["checkpoint_sha256"]:
+        raise RuntimeError("The model changed during processing. Retry with its matching input profile.")
+    scores = inference.pop("score_grid", None)
+    if scores is None:
+        raise RuntimeError("The inference worker did not return a score grid.")
+    progress("Generating mask and candidate polygons")
+    polygons = satprep_candidate_geojson(inference["mask_rle"], meta, scores=np.asarray(scores))
+    overlay = satprep_mask_overlay(inference["mask_rle"], meta)
+    return {
+        "status": "EXPERIMENTAL_MODEL_OUTPUT", "location_id": location_id, "location": label,
+        "patch": satprep_patch_summary(meta), "inference": inference,
+        "candidate_polygons": polygons, "mask_overlay": overlay,
+        "human_review_required": True,
+        "warning": "Unreviewed post-event model candidates, not verified landslides, forecasts, or public warnings.",
+    }
+
+
+class SatelliteJobRequest(BaseModel):
+    operation: Literal["prepare", "infer"]
+    confirm_experimental: bool = False
+    patch_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    days: int = Field(default=120, ge=14, le=365)
+    max_cloud: float = Field(default=35, ge=0, le=100)
+
+
+@app.post("/api/satellite/jobs/{location_id}", status_code=202, tags=["Satellite Intelligence"])
+def satellite_start_job(location_id: int, body: SatelliteJobRequest, role: str = Depends(resolve_role)):
+    require_role(role, "ADMIN")
+    if not body.confirm_experimental:
+        raise HTTPException(400, "Confirm the experimental limitations before processing.")
+    if not any(row["id"] == location_id for row in LOCATIONS):
+        raise HTTPException(404, "Location not found.")
+    try:
+        return satellite_jobs.submit(location_id, body.operation, lambda progress: _satellite_work(
+            location_id, body.operation, days=body.days, max_cloud=body.max_cloud, patch_id=body.patch_id, progress=progress))
     except RuntimeError as exc:
-        raise HTTPException(503,str(exc))
-    except Exception as exc:
-        raise HTTPException(500,f'Satellite patch preparation failed: {type(exc).__name__}: {exc}')
+        raise HTTPException(409, str(exc))
+
+
+@app.get("/api/satellite/jobs/status/{job_id}", tags=["Satellite Intelligence"])
+def satellite_job_status(job_id: str, role: str = Depends(resolve_role)):
+    require_role(role, "ADMIN")
+    job = satellite_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job expired or the service restarted. Start a new operation.")
+    return job
+
+
+def _satellite_sync(location_id, operation, days, max_cloud, confirm_experimental, role):
+    require_role(role, "ADMIN")
+    if not confirm_experimental:
+        raise HTTPException(400, "Confirm the experimental limitations before processing.")
+    if not any(row["id"] == location_id for row in LOCATIONS):
+        raise HTTPException(404, "Location not found.")
+    try:
+        return _satellite_work(location_id, operation, days=days, max_cloud=max_cloud)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/satellite/preprocess/{location_id}", tags=["Satellite Intelligence"])
+def satellite_prepare_location_patch(location_id: int, days: int = Query(120, ge=14, le=365),
+                                     max_cloud: float = Query(35, ge=0, le=100),
+                                     confirm_experimental: bool = False, role: str = Depends(resolve_role)):
+    return _satellite_sync(location_id, "prepare", days, max_cloud, confirm_experimental, role)
+
 
 @app.post("/api/satellite/model/infer-location/{location_id}", tags=["Satellite Intelligence"])
-def satellite_infer_location(
-    location_id:int,
-    days:int=Query(120,ge=14,le=365),
-    max_cloud:float=Query(35,ge=0,le=100),
-    confirm_experimental:bool=False,
-    role:str=Depends(resolve_role)
-):
-    require_role(role,'ADMIN')
-    if not confirm_experimental:
-        raise HTTPException(400,'Set confirm_experimental=true after reviewing the model and preprocessing limitations.')
-    x=next((z for z in LOCATIONS if z['id']==location_id),None)
-    if not x:
-        raise HTTPException(404,'Location not found')
-    try:
-        patch,meta=satprep_prepare_patch(x['lat'],x['lon'],days=days,max_cloud=max_cloud,persist=True)
-        inference=l4s_infer_patch(patch)
-        polygons=satprep_candidate_geojson(inference.get('mask_rle') or [],meta)
-        return {
-            'status':'EXPERIMENTAL_MODEL_OUTPUT',
-            'location_id':location_id,
-            'location':f"{x['name']}, {x['state']}",
-            'patch':satprep_patch_summary(meta),
-            'inference':inference,
-            'candidate_polygons':polygons,
-            'human_review_required':True,
-            'warning':'This is a research post-event candidate segmentation. It is not a verified landslide, calibrated probability, forecast, or public warning.'
-        }
-    except RuntimeError as exc:
-        raise HTTPException(503,str(exc))
-    except ValueError as exc:
-        raise HTTPException(400,str(exc))
-    except Exception as exc:
-        raise HTTPException(500,f'Live satellite inference failed: {type(exc).__name__}: {exc}')
+def satellite_infer_location(location_id: int, days: int = Query(120, ge=14, le=365),
+                             max_cloud: float = Query(35, ge=0, le=100),
+                             confirm_experimental: bool = False, role: str = Depends(resolve_role)):
+    return _satellite_sync(location_id, "infer", days, max_cloud, confirm_experimental, role)
+
 
 @app.post("/api/satellite/model/infer-patch", tags=["Satellite Intelligence"])
-async def satellite_model_infer_patch(file:UploadFile=File(...), role:str=Depends(resolve_role)):
-    require_role(role,'ADMIN')
-    content=await file.read()
-    if len(content) > 4*1024*1024:
-        raise HTTPException(413,'Satellite patch file is too large; upload a 128x128x14 float32 .npy patch.')
-    if not (file.filename or '').lower().endswith('.npy'):
-        raise HTTPException(400,'Upload a .npy array using the Landslide4Sense 128x128x14 channel contract.')
+async def satellite_model_infer_patch(file: UploadFile = File(...), role: str = Depends(resolve_role)):
+    require_role(role, "ADMIN")
+    content = await file.read(2 * 1024 * 1024 + 1)
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(413, "Upload a 128×128×14 float32 NPY patch (maximum 2 MiB).")
+    if not (file.filename or "").lower().endswith(".npy"):
+        raise HTTPException(400, "Upload a NPY array using the Landslide4Sense input contract.")
     try:
-        arr=np.load(io.BytesIO(content), allow_pickle=False)
-        result=l4s_infer_patch(arr)
-        result['filename']=file.filename
-        result['source_contract']='Uploaded 14-channel patch; Sentinel-2 B1..B12 + slope + DEM.'
+        from satellite_l4s import read_patch_bytes
+        arr = read_patch_bytes(content)
+        result = await run_in_threadpool(l4s_infer_patch, arr)
+        result.pop("score_grid", None)
+        result["source_contract"] = "Uploaded benchmark-compatible 14-channel patch; input provenance not verified."
         return result
     except RuntimeError as exc:
-        raise HTTPException(503,str(exc))
+        raise HTTPException(503, str(exc))
     except ValueError as exc:
-        raise HTTPException(400,str(exc))
-    except Exception as exc:
-        raise HTTPException(500,f'Satellite inference failed: {type(exc).__name__}: {exc}')
+        raise HTTPException(400, str(exc))
+
 
 @app.on_event("startup")
 def startup_seed():
@@ -1198,7 +1275,7 @@ def status():
         "risk_engine": ml_status().get("engine", "transparent-fallback"),
         "alert_engine":"draft-advisory-lifecycle; operator review required",
         "browser_notifications":"frontend-ready",
-        "satellite_intelligence":"Sentinel-2 live scene discovery/pairing + optional Landslide4Sense-compatible U-Net adapter; live 14-channel preprocessing pending",
+        "satellite_intelligence":"Sentinel-2 live scene discovery/pairing + optional Landslide4Sense-compatible U-Net adapter; live 14-channel research patch preparation; inference requires verified weights and matching input profile",
         "map":"offline EO Lite / cached NASA / street / terrain / satellite",
         "weather":"Open-Meteo current/stale/missing states; no invented live fallback",
         "live_risk_refresh":"5-minute cache / manual force refresh",

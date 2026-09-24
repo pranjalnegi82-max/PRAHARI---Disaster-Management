@@ -5,6 +5,7 @@
   --navy:#0b1f37;--navy-2:#102b4a;--blue:#0b67d1;--blue-dark:#0755ad;--focus:#0b67d1;
   --low:#24875d;--moderate:#b97912;--high:#d26322;--critical:#c93d3d;--unknown:#71808f;
   --shadow:0 10px 30px rgba(30,47,70,.08);--shadow-soft:0 2px 10px rgba(30,47,70,.05);
+  --border:var(--line);--surface-soft:#f7f9fc;--accent:var(--blue);--shadow-sm:var(--shadow-soft);
 }
 *{box-sizing:border-box}
 html{background:#f5f7fb}
@@ -318,6 +319,61 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
 .sat-candidate-map{margin-top:14px}
 .sat-candidate-map .map-canvas{height:360px;border-radius:14px;border:1px solid var(--border);overflow:hidden}
 .sat-model-state .badge + .badge{margin-left:0}
+.sat-intel-focus{display:flex;flex-direction:column;gap:14px;min-width:0}
+.sat-intel-focus .sat-intel-head{margin:0;align-items:flex-start}
+.sat-intel-focus h2{font-size:22px;line-height:1.25}
+.sat-intel-focus p,.sat-intel-focus .fine{line-height:1.5;overflow-wrap:anywhere}
+.sat-readiness{border:1px solid #e8d7ac;border-radius:12px;padding:14px;background:#fffbf1}
+.sat-readiness strong{display:block;font-size:16px}
+.sat-readiness p{margin:5px 0 0;font-size:13px;color:var(--muted)}
+.sat-available{background:#f2faf6;border-color:#b8dfce}
+.sat-run-controls{display:flex;flex-direction:column;gap:12px}
+.sat-consent,.sat-layer-controls label{display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13px;line-height:1.5;min-height:44px}
+.sat-consent input,.sat-layer-controls input{width:18px;height:18px;flex:none;accent-color:var(--blue)}
+.sat-buttons,.sat-layer-controls{display:flex;gap:10px;flex-wrap:wrap}
+.sat-buttons .btn,.sat-result-heading .btn,.sat-intel-head>.btn{min-height:44px}
+.sat-progress{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;border-radius:10px;background:#edf4fc;font-size:13px}
+.sat-progress small{flex-basis:100%;color:var(--muted)}
+.pulse-dot{width:8px;height:8px;border-radius:50%;background:var(--blue);flex:none}
+.sat-result-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sat-result-heading h3{font-size:21px}
+.sat-result-stats{display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:12px;margin:16px 0}
+.sat-result-stats>div{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}
+.sat-result-stats span{display:block;color:var(--muted);font-size:12px}
+.sat-result-stats strong{display:block;font-size:17px;margin-top:5px;overflow-wrap:anywhere}
+.sat-result-stats>div:last-child strong{font-size:14px}
+.sat-result-panel{margin:0;min-width:0}
+.sat-layer-controls{margin-bottom:8px}
+.sat-table-scroll{overflow-x:auto;margin:15px 0}
+.sat-candidate-table{border-collapse:collapse;width:100%;font-size:13px;text-align:left}
+.sat-candidate-table caption{text-align:left;font-size:12px;color:var(--muted);padding:8px 0;line-height:1.5}
+.sat-candidate-table th,.sat-candidate-table td{padding:10px 8px;border-bottom:1px solid var(--line)}
+.sat-provenance{overflow-wrap:anywhere}
+.sat-intel-focus .disclosure-body{font-size:13px}
+.sat-intel-focus .disclosure>summary{font-size:13px;min-height:44px}
+.sat-intel-focus .fine{font-size:12px}
+.sat-intel-focus .sat-pipeline{margin:0}
+@media(max-width:650px){
+  .sidebar:not(.field-sidebar){height:56px;padding:6px 12px}
+  .side-nav button{min-width:44px;min-height:44px;display:flex;justify-content:center;flex:1}
+  .topbar:not(.field-topbar){top:56px;height:56px;padding:6px 10px;gap:8px;align-items:center}
+  .map-toolbar .segmented button{min-width:0;font-size:12px;padding:10px 6px;min-height:44px}
+  .topbar .portal-identity{display:none}
+  .top-actions{gap:4px}
+  .top-actions .icon-btn,.top-actions .portal-logout{width:40px;height:40px;padding:0;flex:none}
+  .location-search{min-width:0}
+  .location-search input{font-size:12px;min-width:0;padding-right:4px}
+  .sat-intel-focus{padding:14px;gap:12px}
+  .sat-intel-focus h2{font-size:19px}
+  .sat-result-panel{padding:12px}
+  .sat-result-stats{grid-template-columns:1fr 1fr;gap:8px}
+  .sat-result-stats>div:last-child{grid-column:1/-1}
+  .sat-buttons .btn{flex:1}
+  .sat-result-heading{align-items:flex-start;flex-direction:column}
+  .sat-result-heading .btn{width:100%}
+  .sat-layer-controls{gap:2px}
+  .sat-layer-controls label{width:100%}
+}
 @media (max-width:700px){
   .sat-candidate-map .map-canvas{height:280px}
 }

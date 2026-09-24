@@ -1,0 +1,5 @@
+# Install CPU/GPU PyTorch separately for the host; see SATELLITE_SETUP.md.
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+numpy==2.3.2
+python-dotenv==1.1.1
