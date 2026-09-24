@@ -182,13 +182,15 @@ def test_simulated_iot_cannot_escalate_live_alert(client):
     assert after == before
 
 
-def test_satellite_endpoint_does_not_claim_model_inference(client):
+def test_satellite_endpoint_does_not_claim_model_inference(client, monkeypatch):
+    monkeypatch.setattr(main, "fetch_live_weather", lambda x, **kwargs: main.build_replay_packet(x))
     r = client.get("/api/satellite/1")
     assert r.status_code == 200
     body = r.json()
-    assert body["pipeline_status"] == "VISUAL_BASEMAP_ONLY"
-    assert body["analysis_mode"] == "NO_SATELLITE_MODEL_INFERENCE"
-    assert body["detection_module"]["status"] == "ROADMAP"
+    assert body["pipeline_status"] == "SCENE_DISCOVERY_IMPLEMENTED"
+    assert body["analysis_mode"] == "SENTINEL2_SCENE_QA_PLUS_VISUAL_CONTEXT"
+    assert body["detection_module"]["status"] == "CHECK_MODEL_STATUS_ENDPOINT"
+    assert "candidate_polygons" not in body
 
 
 def _make_reviewed_alert(client):

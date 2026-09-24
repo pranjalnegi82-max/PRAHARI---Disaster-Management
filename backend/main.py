@@ -1128,6 +1128,8 @@ def _satellite_process(location_id, operation, *, days, max_cloud, patch_id, pro
         prep = satprep_status()
         if not prep.get("live_inference_ready"):
             raise RuntimeError(prep.get("input_profile_error") or "Enable experimental preprocessing after reviewing SATELLITE_SETUP.md.")
+        if prep.get("profile_checkpoint_sha256") != model.get("checkpoint_sha256"):
+            raise RuntimeError("The input profile belongs to a different model checkpoint.")
     now = time.time()
     for key, value in list(_SATELLITE_PATCHES.items()):
         if now - value["created_at"] > 3600:

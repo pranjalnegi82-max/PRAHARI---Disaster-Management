@@ -131,16 +131,22 @@ def model_input(patch: np.ndarray, meta: dict, checkpoint_sha256: str) -> np.nda
 
 
 def status() -> dict[str, Any]:
-    alos_dem = bool(ALOS_DEM_PATH and Path(ALOS_DEM_PATH).exists())
-    alos_slope = bool(ALOS_SLOPE_PATH and Path(ALOS_SLOPE_PATH).exists())
+    alos_dem = bool(ALOS_DEM_PATH and Path(ALOS_DEM_PATH).is_file())
+    alos_slope = bool(ALOS_SLOPE_PATH and Path(ALOS_SLOPE_PATH).is_file())
+    terrain_source = ("ALOS_LOCAL_SLOPE_DEM" if alos_slope else "ALOS_LOCAL_DEM_DERIVED_SLOPE") if alos_dem else "COPERNICUS_DEM_GLO30_DERIVED_SLOPE"
     profile_error = None
+    profile = None
     try:
-        input_profile()
+        profile = input_profile()
+        if profile["terrain_source"] != terrain_source:
+            profile_error = "The configured terrain source does not match the model input profile."
     except RuntimeError as exc:
         profile_error = str(exc)
     return {
         "input_profile_configured": profile_error is None,
         "input_profile_error": profile_error,
+        "profile_checkpoint_sha256": profile["checkpoint_sha256"] if profile else None,
+        "profile_terrain_source": profile["terrain_source"] if profile else None,
         "live_inference_ready": GEO_AVAILABLE and ALLOW_EXPERIMENTAL and profile_error is None,
         "status": "READY" if GEO_AVAILABLE else "NOT_CONFIGURED",
         "geospatial_runtime": GEO_AVAILABLE,
@@ -287,9 +293,9 @@ def _slope_from_dem(dem: np.ndarray) -> np.ndarray:
 
 
 def _terrain(lat: float, lon: float, target_crs, target_transform):
-    if ALOS_DEM_PATH and Path(ALOS_DEM_PATH).exists():
+    if ALOS_DEM_PATH and Path(ALOS_DEM_PATH).is_file():
         dem,dem_missing=_read_local_raster(ALOS_DEM_PATH,target_crs,target_transform,resampling=Resampling.bilinear)
-        if ALOS_SLOPE_PATH and Path(ALOS_SLOPE_PATH).exists():
+        if ALOS_SLOPE_PATH and Path(ALOS_SLOPE_PATH).is_file():
             slope,slope_missing=_read_local_raster(ALOS_SLOPE_PATH,target_crs,target_transform,resampling=Resampling.bilinear)
             source="ALOS_LOCAL_SLOPE_DEM"
             parity="CLOSEST_AVAILABLE"

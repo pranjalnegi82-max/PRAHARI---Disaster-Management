@@ -39,20 +39,37 @@ function headers(extra = {}) {
 }
 
 export async function request(path, options = {}) {
-  const response = await fetch(`${API}${path}`, {
-    ...options,
-    headers: headers(options.headers || {}),
-  });
-  if (!response.ok) {
-    let message = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      message = body.detail || body.message || message;
-    } catch { /* non-json response */ }
-    throw new Error(message);
+  const { timeout = 60000, signal, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeout);
+  try {
+    const response = await fetch(`${API}${path}`, {
+      ...fetchOptions, signal: controller.signal, headers: headers(options.headers || {}),
+    });
+    if (!response.ok) {
+      let message = `${response.status} ${response.statusText}`;
+      try {
+        const body = await response.json();
+        const detail = body.detail || body.message;
+        if (detail) message = typeof detail === 'string' ? detail : JSON.stringify(detail);
+      } catch { /* non-json response */ }
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+    const type = response.headers.get('content-type') || '';
+    return await (type.includes('application/json') ? response.json() : response.text());
+  } catch (error) {
+    if (timedOut) throw new Error('Request timed out. Check the connection and retry.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
-  const type = response.headers.get('content-type') || '';
-  return type.includes('application/json') ? response.json() : response.text();
 }
 
 export async function loginPortal({ portal, accessKey = '', officerCode = '' }) {
@@ -72,8 +89,9 @@ export async function loginPortal({ portal, accessKey = '', officerCode = '' }) 
   return response.json();
 }
 
-export const get = (path) => request(path);
-export const post = (path, body) => request(path, {
+export const get = (path, options = {}) => request(path, options);
+export const post = (path, body, options = {}) => request(path, {
+  ...options,
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body ?? {}),
