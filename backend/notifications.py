@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from settings import (
@@ -16,6 +15,7 @@ from settings import (
 )
 
 E164_RE = re.compile(r"^\+[1-9]\d{7,14}$")
+FAILED_DELIVERY_STATUSES = frozenset({'FAILED', 'UNDELIVERED', 'ERROR', 'CANCELED'})
 
 
 class NotificationConfigError(RuntimeError):
@@ -51,13 +51,25 @@ def config_status() -> dict[str, Any]:
     sms_sender = bool(TWILIO_MESSAGING_SERVICE_SID or TWILIO_SMS_FROM)
     provider = (NOTIFICATION_PROVIDER or "twilio").lower()
     twilio_selected = provider in {"", "twilio"}
+    issues = []
+    if not EXTERNAL_SMS_ENABLED:
+        issues.append("SMS is disabled. Set PRAHARI_SMS_ENABLED=true on the backend and restart/redeploy it.")
+    if not twilio_selected:
+        issues.append("Set PRAHARI_NOTIFICATION_PROVIDER=twilio on the backend.")
+    if not TWILIO_ACCOUNT_SID:
+        issues.append("Add PRAHARI_TWILIO_ACCOUNT_SID to the backend environment.")
+    if not TWILIO_AUTH_TOKEN:
+        issues.append("Add PRAHARI_TWILIO_AUTH_TOKEN to the backend environment.")
+    if not sms_sender:
+        issues.append("Add PRAHARI_TWILIO_SMS_FROM or PRAHARI_TWILIO_MESSAGING_SERVICE_SID to the backend environment.")
     return {
         "provider": "twilio" if twilio_selected else provider,
         "credentials_configured": creds,
         "sms": {
             "enabled": EXTERNAL_SMS_ENABLED,
-            "ready": bool(EXTERNAL_SMS_ENABLED and twilio_selected and creds and sms_sender),
+            "ready": not issues,
             "sender_configured": sms_sender,
+            "issues": issues,
         },
         "status_callback": callback_url(),
         "signature_validation": TWILIO_VALIDATE_SIGNATURE,
@@ -104,6 +116,8 @@ def send(channel: str, to: str, body: str) -> dict[str, Any]:
         "provider": "twilio",
         "sid": getattr(msg, "sid", None),
         "status": getattr(msg, "status", None) or "queued",
+        "error_code": str(getattr(msg, "error_code", None) or "") or None,
+        "error_message": getattr(msg, "error_message", None),
         "to": to,
         "channel": channel,
     }

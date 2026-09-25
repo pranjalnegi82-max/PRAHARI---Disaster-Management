@@ -588,11 +588,45 @@ function RiskMapPage({locations,selected,onSelect,onAssess,assessment}) {
 
 function ReportsAlerts({reports,alerts,selected,locations,auth,onRefresh}) {
   const [tab,setTab]=useState('reports');
+  const [composeOpen,setComposeOpen]=useState(false);
+  const [draftNotice,setDraftNotice]=useState('');
+  const isAdmin=['ADMIN','DEV_OPERATOR'].includes(auth?.current_role);
   const canEnroll=['FIELD_OFFICER','ADMIN','DEV_OPERATOR'].includes(auth?.current_role);
-  return <div><div className="page-title"><div><h1>Reports & Alerts</h1><p>Field evidence, civilian enrollment and advisory delivery remain traceable and role-controlled.</p></div><button className="btn btn-secondary" onClick={onRefresh}>Refresh</button></div>
+  function openComposer(){setDraftNotice('');setTab('alerts');setComposeOpen(true);}
+  async function draftCreated(alert){setComposeOpen(false);setTab('alerts');setDraftNotice(`Draft #${alert.id} saved. Review the message below, then select Mark reviewed to enable SMS sending.`);await onRefresh();}
+  return <div className="reports-alerts-page"><div className="page-title"><div><h1>Reports & Alerts</h1><p>Field evidence, civilian enrollment and advisory delivery remain traceable and role-controlled.</p></div><div className="report-page-actions">{isAdmin&&<button type="button" className="btn btn-primary" aria-expanded={composeOpen&&tab==='alerts'} aria-controls="advisory-composer" onClick={openComposer}>Create advisory</button>}<button className="btn btn-secondary" onClick={onRefresh}>Refresh</button></div></div>
     <div className="subnav"><button className={tab==='reports'?'active':''} onClick={()=>setTab('reports')}>Citizen reports <Badge>{reports.length}</Badge></button>{canEnroll&&<button className={tab==='enrollment'?'active':''} onClick={()=>setTab('enrollment')}>Civilian enrollment</button>}<button className={tab==='alerts'?'active':''} onClick={()=>setTab('alerts')}>Advisory alerts <Badge>{alerts.length}</Badge></button></div>
+    {tab==='alerts'&&isAdmin&&composeOpen&&<AdvisoryComposer selected={selected} locations={locations} onCreated={draftCreated} onCancel={()=>setComposeOpen(false)}/>}
+    {tab==='alerts'&&draftNotice&&<div className="notice notice-warn draft-saved-notice" role="status">{draftNotice}</div>}
     {tab==='reports'?<ReportsPane reports={reports} selected={selected} onRefresh={onRefresh}/>:tab==='enrollment'?<CivilianEnrollmentPane auth={auth} locations={locations} selected={selected}/>:<AlertsPane alerts={alerts} auth={auth} locations={locations} onRefresh={onRefresh}/>} 
   </div>;
+}
+
+function AdvisoryComposer({selected,locations,onCreated,onCancel}) {
+  const [form,setForm]=useState({location_id:String(selected?.id||locations[0]?.id||''),level:'MODERATE',message:''});
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const area=locations.find(x=>String(x.id)===form.location_id);
+  const message=form.message.trim();
+  async function saveDraft(e){
+    e.preventDefault();setError('');setBusy(true);
+    try{
+      const out=await post('/api/alerts',{location_id:Number(form.location_id),level:form.level,message});
+      await onCreated(out.alert);
+    }catch(e){setError(e.message);}finally{setBusy(false);}
+  }
+  return <section id="advisory-composer" className="advisory-composer" aria-label="Create advisory draft"><Panel title="Create advisory draft" subtitle="Choose an area and write the message. Saving creates a draft for review.">
+    <form className="report-form" onSubmit={saveDraft}>
+      {error&&<div className="notice notice-error" role="alert">{error}</div>}
+      <div className="form-row">
+        <label className="field"><span>Advisory area</span><select required disabled={busy} value={form.location_id} onChange={e=>setForm(f=>({...f,location_id:e.target.value}))}><option value="" disabled>Select an area</option>{locations.map(x=><option key={x.id} value={x.id}>{x.name}, {x.state}</option>)}</select></label>
+        <label className="field"><span>Advisory severity</span><select disabled={busy} value={form.level} onChange={e=>setForm(f=>({...f,level:e.target.value}))}>{['LOW','MODERATE','HIGH','CRITICAL'].map(level=><option key={level}>{level}</option>)}</select></label>
+      </div>
+      <label className="field"><span>Advisory message</span><textarea required autoFocus disabled={busy} minLength={10} maxLength={500} value={form.message} onChange={e=>setForm(f=>({...f,message:e.target.value}))} placeholder="Describe the situation and what recipients should do."/><small>{form.message.length}/500 characters. The message will be sent as written.</small></label>
+      {message&&area&&<div className="sms-draft-preview"><strong>SMS preview</strong><p>{`PRAHARI | ${area.name}, ${area.state}\n${message}`}</p></div>}
+      <div className="button-row"><button type="submit" className="btn btn-primary" disabled={busy||!area||message.length<10}>{busy?'Saving draft…':'Save draft'}</button><button type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>Cancel</button></div>
+    </form>
+  </Panel></section>;
 }
 
 function ReportsPane({reports,selected,onRefresh,canManage=true}) {
@@ -658,42 +692,57 @@ function CivilianEnrollmentPane({auth,locations,selected}) {
 
 function AlertsPane({alerts,auth,locations,onRefresh}) {
   const [error,setError]=useState('');
+  const [notice,setNotice]=useState('');
+  const [deliveryByAlert,setDeliveryByAlert]=useState({});
   const [busy,setBusy]=useState(null);
   const role=auth?.current_role || 'PUBLIC';
   const isAdmin=['ADMIN','DEV_OPERATOR'].includes(role);
   const [targetByAlert,setTargetByAlert]=useState({});
-  async function transition(a,to){setError('');setBusy(`${a.id}-${to}`);try{await patch(`/api/alerts/${a.id}/transition`,{to_status:to,note:`Transitioned from PRAHARI command center`});await onRefresh();}catch(e){setError(e.message);}finally{setBusy(null);}}
+  async function transition(a,to){setError('');setNotice('');setBusy(`${a.id}-${to}`);try{await patch(`/api/alerts/${a.id}/transition`,{to_status:to,note:`Transitioned from PRAHARI command center`});await onRefresh();}catch(e){setError(e.message);}finally{setBusy(null);}}
   async function issueAndNotify(a){
-    setError('');setBusy(`${a.id}-notify`);
+    setError('');setNotice('');setBusy(`${a.id}-notify`);
     try{
       const target=targetByAlert[a.id] ?? String(a.location_id ?? 'ALL');
       const scope=target==='ALL'?'ALL_MONITORED':Number(target)===Number(a.location_id)?'ALERT_AREA':'SPECIFIC_AREA';
       const targetId=target==='ALL'?null:Number(target);
       const query=`?scope=${scope}${scope==='SPECIFIC_AREA'?`&target_location_id=${targetId}`:''}`;
       const preview=await get(`/api/alerts/${a.id}/notification-preview${query}`);
-      if(!(preview.provider?.sms?.ready && preview.sms_recipients>0)) throw new Error('SMS is not provider-ready or there are no opted-in civilians in the selected alert area.');
-      const ok=window.confirm(`Issue this advisory and send SMS to ${preview.target_label}?\n\nRecipients: ${preview.sms_recipients}\nAlert source: ${a.location}\n\nOnly provider delivery receipts will be treated as delivered.`);
+      if(!preview.provider?.sms?.ready) throw new Error(preview.provider?.sms?.issues?.join(' ') || 'SMS is not configured. Check Data & Settings → Notification channels.');
+      if(!preview.sms_recipients) throw new Error(`No opted-in SMS recipients in ${preview.target_label}. Enroll a civilian for this area before sending.`);
+      const retryFailed=a.lifecycle_status==='ISSUED';
+      const ok=window.confirm(`${retryFailed?'Send SMS / retry failed deliveries':'Issue this advisory and send SMS'} to ${preview.target_label}?\n\nEligible recipients: ${preview.sms_recipients}\nAlert source: ${a.location}${preview.message?`\n\nMessage:\n${preview.message}`:''}\n\nQueued or delivered messages will be skipped. Only provider delivery receipts will be treated as delivered.`);
       if(!ok) return;
-      const out=await post(`/api/alerts/${a.id}/issue-and-notify`,{note:`Admin initiated SMS broadcast to ${preview.target_label}`,scope,target_location_id:targetId});
-      setError(out.failed ? `${out.accepted_or_queued} accepted/queued for ${out.target_label}; ${out.failed} failed.` : `${out.accepted_or_queued} SMS request(s) accepted/queued for ${out.target_label}. Delivery confirmation updates separately.`);
+      const out=await post(`/api/alerts/${a.id}/issue-and-notify`,{note:`Admin initiated SMS broadcast to ${preview.target_label}`,scope,target_location_id:targetId,retry_failed:retryFailed});
+      const skipped=out.skipped_duplicates ?? out.results?.filter(r=>r.status==='SKIPPED_DUPLICATE').length ?? 0;
+      const summary=`${out.accepted_or_queued} accepted/queued for ${out.target_label}; ${out.failed} failed; ${skipped} already attempted and skipped.`;
+      if(out.failed){
+        const reasons=[...new Set((out.results||[]).filter(r=>r.error||r.error_code).map(r=>`${r.error_code?`Twilio ${r.error_code}: `:''}${r.error||'See delivery details.'}`))];
+        setError(`${summary} ${reasons.join(' ')}`);
+      }else setNotice(`${summary} Delivery confirmation updates separately.`);
+      await loadDeliveries(a);
       await onRefresh();
     }catch(e){setError(e.message);}finally{setBusy(null);}
   }
-  async function refreshDelivery(a){setError('');setBusy(`${a.id}-refresh`);try{await post(`/api/alerts/${a.id}/deliveries/refresh`,{});await onRefresh();}catch(e){setError(e.message);}finally{setBusy(null);}}
+  async function loadDeliveries(a){const rows=await get(`/api/alerts/${a.id}/deliveries`);setDeliveryByAlert(m=>({...m,[a.id]:rows}));}
+  async function showDeliveries(a){setError('');setNotice('');setBusy(`${a.id}-details`);try{await loadDeliveries(a);}catch(e){setError(e.message);}finally{setBusy(null);}}
+  async function refreshDelivery(a){setError('');setNotice('');setBusy(`${a.id}-refresh`);try{const out=await post(`/api/alerts/${a.id}/deliveries/refresh`,{});const errors=(out.deliveries||[]).filter(r=>r?.refresh_error).map(r=>r.refresh_error);if(errors.length)setError(`Could not refresh some delivery statuses: ${[...new Set(errors)].join(' ')}`);else setNotice('Delivery statuses refreshed.');await loadDeliveries(a);await onRefresh();}catch(e){setError(e.message);}finally{setBusy(null);}}
   function nextActions(a){const s=a.lifecycle_status||'DRAFT'; if(s==='DRAFT')return['REVIEWED','RESOLVED'];if(s==='REVIEWED')return isAdmin?['RESOLVED']:['ISSUED','RESOLVED'];if(s==='ISSUED')return['ACKNOWLEDGED','RESOLVED'];if(s==='ACKNOWLEDGED')return['RESOLVED'];return[];}
   return <Panel title="Advisory lifecycle" subtitle="DRAFT → REVIEWED → ISSUED → ACKNOWLEDGED → RESOLVED. External SMS delivery requires an explicit admin action.">
-    {error&&<div className={error.includes('failed')||error.includes('No provider')?'notice notice-error':'notice notice-warn'}>{error}</div>}
+    {error&&<div className="notice notice-error" role="alert">{error}</div>}
+    {notice&&<div className="notice notice-warn" role="status">{notice}</div>}
     <div className="card-list">{alerts.length?alerts.map(a=><article className="record-card alert-card" key={a.id}>
       <div className="record-top"><RiskBadge level={a.level}/><Badge tone={a.lifecycle_status==='ISSUED'?'danger':a.lifecycle_status==='DRAFT'?'warn':'neutral'}>{a.lifecycle_status}</Badge></div>
-      <h3>{a.location}</h3><p>{a.message}</p><div className="record-meta">Created {fmtTime(a.created_at)} · Source: {a.source}</div>
+      <h3>{a.location}</h3><p className="advisory-message">{a.message}</p><div className="record-meta">Created {fmtTime(a.created_at)} · Source: {a.advisory_type==='MANUAL'?'Administrator-written advisory':a.source}</div>
       <div className="record-actions">
         {nextActions(a).map(to=><button disabled={!!busy} key={to} className={to==='ISSUED'?'btn btn-primary small':'btn btn-secondary small'} onClick={()=>transition(a,to)}>{to==='REVIEWED'?'Mark reviewed':to==='ISSUED'?'Issue internally':to==='ACKNOWLEDGED'?'Acknowledge':to==='RESOLVED'?'Resolve':to}</button>)}
         {isAdmin && ['REVIEWED','ISSUED'].includes(a.lifecycle_status) && <label className="alert-target"><span>SMS area</span><select value={targetByAlert[a.id] ?? String(a.location_id ?? 'ALL')} onChange={e=>setTargetByAlert(m=>({...m,[a.id]:e.target.value}))}><option value="ALL">All monitored areas</option>{locations.map(x=><option key={x.id} value={x.id}>{x.name}, {x.state}{x.id===a.location_id?' · alert area':''}</option>)}</select></label>}
         {isAdmin && ['REVIEWED','ISSUED'].includes(a.lifecycle_status) && <button disabled={!!busy} className="btn btn-danger small" onClick={()=>issueAndNotify(a)}>{busy===`${a.id}-notify`?'Sending…':a.lifecycle_status==='REVIEWED'?'Issue & send SMS':'Send / retry SMS'}</button>}
         {isAdmin && a.lifecycle_status==='ISSUED' && <button disabled={!!busy} className="btn btn-ghost small" onClick={()=>refreshDelivery(a)}>Refresh delivery status</button>}
+        {isAdmin && ['ISSUED','ACKNOWLEDGED','RESOLVED'].includes(a.lifecycle_status) && <button disabled={!!busy} className="btn btn-ghost small" onClick={()=>showDeliveries(a)}>View SMS delivery details</button>}
       </div>
+      {deliveryByAlert[a.id]&&<div className="sms-delivery-list" aria-label="SMS delivery details">{deliveryByAlert[a.id].length?deliveryByAlert[a.id].map(d=><div className="sms-delivery-row" key={d.id}><strong>{d.recipient_name||`Recipient #${d.recipient_id}`}</strong><span>{d.status}{d.error_code?` · Twilio ${d.error_code}`:''}</span>{d.error_message&&<span>{d.error_message}</span>}{/^\d+$/.test(String(d.error_code||''))&&<a href={`https://www.twilio.com/docs/api/errors/${d.error_code}`} target="_blank" rel="noreferrer">Error explanation</a>}</div>):<p className="fine">No SMS attempts recorded for this advisory.</p>}</div>}
       {a.channels&&<details><summary>Delivery channels</summary><div className="channel-list">{Object.entries(a.channels).map(([k,v])=><span key={k}><strong>{k}</strong>: {v.status}{v.delivered?` · ${v.delivered} delivered`:''}{v.accepted_or_sent?` · ${v.accepted_or_sent} queued/sent`:''}{v.failed?` · ${v.failed} failed`:''}{v.confirmed_delivery?' · provider confirmed':''}</span>)}</div><p className="fine">{a.delivery_note}</p></details>}
-    </article>):<Empty title="No advisories" detail="High/critical recorded assessments can create draft advisories."/>}</div>
+    </article>):<Empty title="No advisories" detail={isAdmin?'Select Create advisory above to write a draft. Recorded high/critical assessments can also create drafts.':'Recorded high/critical assessments can create draft advisories.'}/>}</div>
   </Panel>;
 }
 
@@ -716,7 +765,7 @@ function DataSettings({system,sources,auth,selected,locations,session,onLogout,o
       <Panel title="Data sources" subtitle="Origin and operational status are shown explicitly."><div className="source-table" role="table">{sourceList.map(([id,s])=><div className="source-row" key={id}><div><strong>{s.name}</strong><span>{s.kind}</span></div><StateBadge state={s.status}/><div><span>{s.coverage}</span><small>{s.spatial_resolution}</small></div><a href={s.origin?.startsWith('http')?s.origin:undefined} target="_blank" rel="noreferrer">{s.origin}</a></div>)}</div><p className="fine">{sources?.policy}</p></Panel>
       <Panel title="System health"><div className="status-grid">{system?Object.entries(system).filter(([k])=>!['last_sync'].includes(k)).slice(0,14).map(([k,v])=><div key={k}><span>{k.replaceAll('_',' ')}</span><strong>{typeof v==='boolean'?(v?'Yes':'No'):String(v)}</strong></div>):<Loading/>}</div></Panel>
       <Panel title="Admin portal session" subtitle={auth?.auth_required?'Protected admin session. Credentials remain in this browser session only.':'Local development mode is open; enable authentication before shared deployment.'}><div className="session-card"><span className="session-role"><Icon name="shield" size={18}/><strong>{auth?.current_role||session?.portal||'ADMIN'}</strong></span><div><span>Portal</span><strong>Administration & Command Center</strong></div><div><span>Scope</span><strong>All monitored areas</strong></div><button className="btn btn-secondary small" onClick={onLogout}><Icon name="logout" size={15}/> Sign out</button></div></Panel>
-      <Panel title="Notification channels" subtitle="Provider readiness, not just toggle state."><div className="channel-list">{channels?Object.entries(channels).filter(([k])=>!['policy','status_callback','active_recipients'].includes(k)).map(([k,v])=><span key={k}><strong>{k}</strong>: {v.status} · {v.delivery}{v.opted_in_recipients!=null?` · ${v.opted_in_recipients} opted in`:''}</span>):<Loading/>}</div>{channels&&<div className="notification-summary"><span>Active recipients <strong>{channels.active_recipients??0}</strong></span><span>Status callback <strong>{channels.status_callback?'Configured':'Not configured'}</strong></span></div>}<p className="fine">{channels?.policy}</p></Panel>
+      <Panel title="Notification channels" subtitle="Configuration status; delivery is confirmed by Twilio receipts."><div className="channel-list">{channels?Object.entries(channels).filter(([k])=>!['policy','status_callback','active_recipients'].includes(k)).map(([k,v])=><span key={k}><strong>{k}</strong>: {v.status} · {v.delivery}{v.opted_in_recipients!=null?` · ${v.opted_in_recipients} opted in`:''}</span>):<Loading/>}</div>{channels&&<div className="notification-summary"><span>Active recipients <strong>{channels.active_recipients??0}</strong></span><span>Status callback <strong>{channels.status_callback?'Configured':'Not configured'}</strong></span></div>}{!!channels?.sms?.issues?.length&&<div className="notice notice-warn"><strong>SMS setup needed</strong><ul>{channels.sms.issues.map(issue=><li key={issue}>{issue}</li>)}</ul><span>For Render, update the API service → Environment, then save and redeploy.</span></div>}<p className="fine">{channels?.policy}</p></Panel>
     </div>
 
     <Panel title="Civilian SMS registry" subtitle="Field officers register opted-in civilians by posting; admins retain oversight and emergency correction access." className="recipient-panel">
@@ -735,7 +784,7 @@ function DataSettings({system,sources,auth,selected,locations,session,onLogout,o
       <p className="fine">PRAHARI never sends to arbitrary numbers. SMS delivery is restricted to this consented directory and is logged per recipient.</p>
     </Panel>
 
-    <details className="disclosure"><summary>Twilio setup & delivery behavior</summary><div className="disclosure-body"><p>Set Twilio credentials and the SMS sender only in the backend <code>.env</code>. Never place them in Vite/frontend environment files.</p><p>Delivery status callbacks require a public HTTPS base URL. For a local demo, the admin can refresh delivery status manually.</p><p>For India SMS, sender/DLT requirements depend on the route and account setup; finish provider compliance before relying on this for public deployment.</p></div></details>
+    <details className="disclosure"><summary>Twilio setup & delivery behavior</summary><div className="disclosure-body"><p>On Render, configure SMS in the API service’s Environment settings and redeploy. For local development, use the project <code>.env</code>. Credentials belong only on the backend.</p><p>Set <code>PRAHARI_SMS_ENABLED=true</code>, <code>PRAHARI_TWILIO_ACCOUNT_SID</code>, <code>PRAHARI_TWILIO_AUTH_TOKEN</code>, and either <code>PRAHARI_TWILIO_SMS_FROM</code> or <code>PRAHARI_TWILIO_MESSAGING_SERVICE_SID</code>.</p><p>Delivery status callbacks require a public HTTPS base URL. For a local demo, the admin can refresh delivery status manually. Use View SMS delivery details to inspect provider errors before retrying failed messages.</p><p>For India SMS, sender/DLT requirements depend on the route and account setup; finish provider compliance before relying on this for public deployment.</p></div></details>
     <details className="disclosure"><summary>Satellite & post-event detection roadmap</summary><div className="disclosure-body"><p><strong>Current:</strong> {satellite?.pipeline_status || 'Visual basemap context only'}.</p><p>{satellite?.detection_module?.note}</p><p>Landslide4Sense-style semantic segmentation remains a separate post-event inventory capability and is not represented as future-risk forecasting.</p></div></details>
     <details className="disclosure"><summary>Experimental ML model</summary><div className="disclosure-body"><p><strong>{model?.model_type || 'Research ensemble'}</strong></p><p>{model?.warning || 'Experimental model is not field calibrated.'}</p><p className="fine">Primary operational UI uses the transparent screening baseline until a real NER dataset is trained and validated spatially/temporally.</p></div></details>
     <details className="disclosure"><summary>Infrastructure & routing · prototype data</summary><div className="disclosure-body"><p>These modules are preserved but clearly marked as non-authoritative until verified GIS layers are connected.</p><div className="mini-list">{infra.filter(x=>x.location_id===selected?.id).map(x=><span key={`${x.type}-${x.name}`}>{x.type}: {x.name} · {x.data_status}</span>)}{routes.filter(x=>x.location_id===selected?.id).map(x=><span key={x.id}>Route suggestion: {x.route} · {x.status} · not a safety claim</span>)}</div></div></details>

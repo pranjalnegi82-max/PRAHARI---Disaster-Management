@@ -377,3 +377,13 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
 @media (max-width:700px){
   .sat-candidate-map .map-canvas{height:280px}
 }
+.sms-delivery-list{display:grid;gap:8px;margin-top:12px}
+.sms-delivery-row{display:grid;gap:4px;padding:12px;border:1px solid var(--line);border-radius:10px;font-size:12px;overflow-wrap:anywhere}
+.notice ul{margin:6px 0;padding-left:20px;overflow-wrap:anywhere}
+.disclosure-body code{overflow-wrap:anywhere}
+.report-page-actions{display:flex;gap:8px;flex-wrap:wrap}
+.advisory-composer,.draft-saved-notice{margin-bottom:16px}
+.sms-draft-preview{padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:13px}
+.sms-draft-preview p,.advisory-message{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:650px){.report-page-actions .btn{flex:1}}
+@media(max-width:400px){.reports-alerts-page .subnav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.reports-alerts-page .subnav button{min-width:0;flex-wrap:wrap;gap:4px;padding:9px 5px;font-size:12px}}
