@@ -36,7 +36,7 @@ The Blueprint intentionally starts with:
 `PRAHARI_SMS_ENABLED=false`
 
 After the API and portal work correctly:
-1. Add valid Twilio credentials to the API service.
+1. Open the **API service → Environment** in Render. Add `PRAHARI_TWILIO_ACCOUNT_SID` and `PRAHARI_TWILIO_AUTH_TOKEN`, plus either `PRAHARI_TWILIO_SMS_FROM` (an SMS-capable Twilio sender) or `PRAHARI_TWILIO_MESSAGING_SERVICE_SID`. Keep these values out of the frontend and Git.
 2. Set `PRAHARI_SMS_ENABLED=true`.
 3. Keep `PRAHARI_PUBLIC_BASE_URL=https://prahari-sih26001-pranjal-api.onrender.com`.
 4. Redeploy.
@@ -44,6 +44,17 @@ After the API and portal work correctly:
 Twilio delivery callbacks will use:
 
 `https://prahari-sih26001-pranjal-api.onrender.com/api/notification/twilio/status`
+
+### If SMS is not arriving
+
+1. In **Data & Settings → Notification channels**, check the specific setup issues. `READY` means the backend has the required configuration; it does not verify the account, balance, sender permissions, or destination availability.
+2. Confirm the intended area has an ACTIVE, opted-in SMS recipient. Mark the advisory REVIEWED before using **Issue & send SMS**.
+3. Open **View SMS delivery details** and **Refresh delivery status**. PRAHARI shows the provider error code and message; `QUEUED` or `SENT` does not confirm receipt.
+4. Correct the reported issue in Twilio, then use **Send / retry SMS**. Failed/undelivered attempts can be retried; queued, sent, and delivered attempts are skipped to avoid resending them.
+
+Twilio [error 21608](https://www.twilio.com/docs/api/errors/21608) concerns an unverified recipient on a restricted account. Use the linked provider explanation for the exact account steps. Other provider failures can be looked up in the [Twilio error dictionary](https://www.twilio.com/docs/api/errors); delivery states are documented in the [Message resource](https://www.twilio.com/docs/messaging/api/message-resource).
+
+The Blueprint leaves SMS disabled by default. Enabling it requires server configuration and a redeploy; updating application code alone does not enable delivery.
 
 ## Important persistence limitation
 

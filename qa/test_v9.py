@@ -265,6 +265,111 @@ def test_twilio_callback_updates_delivery_confirmation(monkeypatch, client):
     assert deliveries[0]['delivered_at'] is not None
 
 
+def _sms_test_ready(monkeypatch):
+    monkeypatch.setattr(main, 'notification_config_status', lambda: {
+        'provider':'twilio', 'sms':{'enabled':True, 'ready':True, 'issues':[]},
+    })
+
+
+def _sms_test_recipient(client, phone='+919876543210'):
+    response=client.post('/api/notification/recipients', json={
+        'name':'Synthetic SMS test', 'phone_e164':phone, 'location_id':1,
+        'consent_confirmed':True,
+    })
+    assert response.status_code == 200
+    return response.json()['recipient']['id']
+
+
+@pytest.mark.parametrize('status', ['FAILED','UNDELIVERED','ERROR','CANCELED'])
+def test_sms_retry_only_retries_failed_deliveries(monkeypatch, client, status):
+    aid=_make_reviewed_alert(client)
+    failed_id=_sms_test_recipient(client)
+    delivered_id=_sms_test_recipient(client, '+919876543211')
+    queued_id=_sms_test_recipient(client, '+919876543212')
+    _sms_test_ready(monkeypatch)
+    main._upsert_delivery(aid, failed_id, 'sms', status=status, sid='SMOLD')
+    main._upsert_delivery(aid, delivered_id, 'sms', status='DELIVERED', sid='SMDELIVERED')
+    main._upsert_delivery(aid, queued_id, 'sms', status='QUEUED', sid='SMQUEUED')
+    sent=[]
+    def fake_send(channel, to, body):
+        sent.append(to)
+        return {'sid':'SMRETRY', 'status':'queued'}
+    monkeypatch.setattr(main, 'send_notification', fake_send)
+    response=client.post(f'/api/alerts/{aid}/issue-and-notify', json={'retry_failed':True})
+    assert response.status_code == 200
+    assert sent == ['+919876543210']
+    assert response.json()['skipped_duplicates'] == 2
+    assert response.json()['accepted_or_queued'] == 1
+    # A callback for the previous attempt cannot overwrite the new attempt.
+    assert main._record_provider_status('SMOLD','undelivered','30003') is None
+    rows=client.get(f'/api/alerts/{aid}/deliveries').json()
+    retried=next(row for row in rows if row['recipient_id']==failed_id)
+    assert retried['provider_message_sid'] == 'SMRETRY'
+    assert retried['status'] == 'QUEUED'
+
+
+def test_failed_sms_retry_does_not_retain_old_provider_sid(monkeypatch, client):
+    aid=_make_reviewed_alert(client)
+    rid=_sms_test_recipient(client)
+    _sms_test_ready(monkeypatch)
+    main._upsert_delivery(aid, rid, 'sms', status='UNDELIVERED', sid='SMOLD')
+    class ProviderRejected(Exception):
+        code=21608
+        msg='Synthetic recipient is not verified.'
+    def reject(*args):
+        raise ProviderRejected()
+    monkeypatch.setattr(main, 'send_notification', reject)
+    response=client.post(f'/api/alerts/{aid}/issue-and-notify', json={'retry_failed':True})
+    assert response.status_code == 200
+    assert response.json()['failed'] == 1
+    assert response.json()['results'][0]['error_code'] == '21608'
+    row=client.get(f'/api/alerts/{aid}/deliveries').json()[0]
+    assert row['provider_message_sid'] is None
+    assert row['error_code'] == '21608'
+    assert row['error_message'] == ProviderRejected.msg
+    assert main._record_provider_status('SMOLD','sent') is None
+
+
+def test_immediate_undelivered_sms_is_counted_as_failure(monkeypatch, client):
+    aid=_make_reviewed_alert(client)
+    _sms_test_recipient(client)
+    _sms_test_ready(monkeypatch)
+    monkeypatch.setattr(main, 'send_notification', lambda *a: {
+        'sid':'SMFAILED', 'status':'undelivered', 'error_code':30003,
+        'error_message':'Synthetic delivery failure.',
+    })
+    response=client.post(f'/api/alerts/{aid}/issue-and-notify', json={})
+    assert response.json()['accepted_or_queued'] == 0
+    assert response.json()['failed'] == 1
+    row=client.get(f'/api/alerts/{aid}/deliveries').json()[0]
+    assert row['status'] == 'UNDELIVERED'
+    assert row['error_code'] == '30003'
+
+
+def test_sms_config_lists_missing_settings_without_exposing_secrets(monkeypatch, client):
+    import notifications
+    monkeypatch.setattr(notifications, 'EXTERNAL_SMS_ENABLED', False)
+    monkeypatch.setattr(notifications, 'NOTIFICATION_PROVIDER', 'twilio')
+    monkeypatch.setattr(notifications, 'TWILIO_ACCOUNT_SID', '')
+    monkeypatch.setattr(notifications, 'TWILIO_AUTH_TOKEN', 'synthetic-secret-must-not-leak')
+    monkeypatch.setattr(notifications, 'TWILIO_SMS_FROM', '')
+    monkeypatch.setattr(notifications, 'TWILIO_MESSAGING_SERVICE_SID', '')
+    aid=_make_reviewed_alert(client)
+    _sms_test_recipient(client)
+    preview=client.get(f'/api/alerts/{aid}/notification-preview').json()
+    assert preview['provider']['sms']['ready'] is False
+    issues=' '.join(preview['provider']['sms']['issues'])
+    assert 'PRAHARI_SMS_ENABLED=true' in issues
+    assert 'PRAHARI_TWILIO_ACCOUNT_SID' in issues
+    assert 'PRAHARI_TWILIO_SMS_FROM' in issues
+    assert 'synthetic-secret-must-not-leak' not in str(preview)
+    response=client.post(f'/api/alerts/{aid}/issue-and-notify', json={})
+    assert response.status_code == 503
+    assert 'PRAHARI_SMS_ENABLED=true' in response.json()['detail']
+    channels=client.get('/api/notification/channels').json()
+    assert channels['sms']['issues'] == preview['provider']['sms']['issues']
+
+
 def test_external_notification_management_is_admin_only(client):
     import auth
     auth.AUTH_REQUIRED = True

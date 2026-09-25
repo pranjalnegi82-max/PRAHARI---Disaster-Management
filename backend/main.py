@@ -39,6 +39,7 @@ from satellite_preprocess import (status as satprep_status, prepare_patch as sat
                                   patch_summary as satprep_patch_summary, candidate_geojson as satprep_candidate_geojson,
                                   model_input as satprep_model_input, mask_overlay as satprep_mask_overlay)
 from notifications import (
+    FAILED_DELIVERY_STATUSES,
     config_status as notification_config_status, normalize_e164, send as send_notification,
     fetch_status as fetch_notification_status, validate_signature as validate_twilio_signature,
     callback_url as notification_callback_url, NotificationConfigError,
@@ -848,7 +849,7 @@ def localized_alert(row, language="en"):
     def channel_state(name, enabled):
         counts=delivery.get(name,{})
         delivered=sum(counts.get(k,0) for k in ('DELIVERED','READ'))
-        failed=sum(counts.get(k,0) for k in ('FAILED','UNDELIVERED'))
+        failed=sum(counts.get(k,0) for k in FAILED_DELIVERY_STATUSES)
         accepted=sum(counts.get(k,0) for k in ('QUEUED','ACCEPTED','SENDING','SENT'))
         return {
             'status':'ENABLED' if enabled else 'DISABLED',
@@ -924,7 +925,7 @@ def _upsert_delivery(alert_id:int, recipient_id:int, channel:str, *, status:str,
     now=int(time.time()); con=db(); cur=con.cursor()
     existing=cur.execute("SELECT id FROM notification_deliveries WHERE alert_id=? AND recipient_id=? AND channel=?",(alert_id,recipient_id,channel)).fetchone()
     if existing:
-        cur.execute("""UPDATE notification_deliveries SET provider=?,provider_message_sid=COALESCE(?,provider_message_sid),status=?,error_code=?,error_message=?,updated_at=?,attempted_at=COALESCE(attempted_at,?) WHERE id=?""",
+        cur.execute("""UPDATE notification_deliveries SET provider=?,provider_message_sid=?,status=?,error_code=?,error_message=?,updated_at=?,attempted_at=?,delivered_at=NULL,read_at=NULL WHERE id=?""",
                     (provider,sid,status,error_code,error_message,now,now,existing['id']))
         did=existing['id']
     else:
@@ -1740,7 +1741,8 @@ def issue_and_notify(alert_id:int, body:AlertBroadcastRequest, role:str=Depends(
         raise HTTPException(409,'No ACTIVE opted-in SMS recipients are enrolled for the selected area')
     cfg=notification_config_status()
     if not cfg.get('sms',{}).get('ready'):
-        raise HTTPException(503,'SMS provider is not ready. Configure Twilio credentials and SMS sender first.')
+        issues=cfg.get('sms',{}).get('issues',[])
+        raise HTTPException(503,' '.join(issues) or 'SMS provider is not ready. Configure Twilio credentials and SMS sender first.')
     if current=='REVIEWED':
         alert=_transition_alert(alert_id,'ISSUED',role,body.note)
         con=db(); row=con.execute('SELECT * FROM alerts WHERE id=?',(alert_id,)).fetchone(); con.close(); alert=dict(row)
@@ -1748,7 +1750,7 @@ def issue_and_notify(alert_id:int, body:AlertBroadcastRequest, role:str=Depends(
     results=[]
     for recipient in recipients:
         con=db(); existing=con.execute("SELECT * FROM notification_deliveries WHERE alert_id=? AND recipient_id=? AND channel='sms'",(alert_id,recipient['id'])).fetchone(); con.close()
-        if existing and not (body.retry_failed and str(existing['status']).upper() in ('FAILED','UNDELIVERED','ERROR')):
+        if existing and not (body.retry_failed and str(existing['status']).upper() in FAILED_DELIVERY_STATUSES):
             results.append({'recipient_id':recipient['id'],'channel':'sms','status':'SKIPPED_DUPLICATE','provider_message_sid':existing['provider_message_sid']})
             continue
         message=_alert_broadcast_text(alert,recipient.get('language') or 'en',sms=True)
@@ -1756,17 +1758,23 @@ def issue_and_notify(alert_id:int, body:AlertBroadcastRequest, role:str=Depends(
             _upsert_delivery(alert_id,recipient['id'],'sms',status='ATTEMPTING')
             sent=send_notification('sms',recipient['phone_e164'],message)
             status=str(sent.get('status') or 'QUEUED').upper()
-            _upsert_delivery(alert_id,recipient['id'],'sms',status=status,sid=sent.get('sid'))
-            results.append({'recipient_id':recipient['id'],'channel':'sms','status':status,'provider_message_sid':sent.get('sid')})
+            error_code=str(sent.get('error_code') or '') or None
+            error_message=sent.get('error_message')
+            _upsert_delivery(alert_id,recipient['id'],'sms',status=status,sid=sent.get('sid'),error_code=error_code,error_message=error_message)
+            results.append({'recipient_id':recipient['id'],'channel':'sms','status':status,'provider_message_sid':sent.get('sid'),
+                            'error_code':error_code,'error':error_message})
         except Exception as exc:
-            _upsert_delivery(alert_id,recipient['id'],'sms',status='FAILED',error_message=str(exc))
-            results.append({'recipient_id':recipient['id'],'channel':'sms','status':'FAILED','error':str(exc)})
+            error_code=str(getattr(exc,'code',None) or '') or None
+            error_message=getattr(exc,'msg',None) or str(exc)
+            _upsert_delivery(alert_id,recipient['id'],'sms',status='FAILED',error_code=error_code,error_message=error_message)
+            results.append({'recipient_id':recipient['id'],'channel':'sms','status':'FAILED','error_code':error_code,'error':error_message})
     now=int(time.time()); con=db(); con.execute("INSERT INTO system_events(event_type,detail,created_at) VALUES(?,?,?)",('ALERT_EXTERNAL_BROADCAST',f'Alert {alert_id} SMS broadcast initiated by {role}; scope={body.scope}; target={_broadcast_target_label(body.scope,alert,body.target_location_id)}',now)); con.commit(); con.close()
-    accepted=sum(1 for r in results if r['status'] not in ('FAILED','SKIPPED_DUPLICATE'))
-    failed=sum(1 for r in results if r['status']=='FAILED')
+    accepted=sum(1 for r in results if r['status'] not in FAILED_DELIVERY_STATUSES and r['status']!='SKIPPED_DUPLICATE')
+    failed=sum(1 for r in results if r['status'] in FAILED_DELIVERY_STATUSES)
+    skipped=sum(1 for r in results if r['status']=='SKIPPED_DUPLICATE')
     return {'ok':True,'alert':localized_alert(row if current=='ISSUED' else dict(row),'en'),'broadcast_scope':body.scope,
             'target_label':_broadcast_target_label(body.scope,alert,body.target_location_id),
-            'eligible_recipients':len(recipients),'accepted_or_queued':accepted,'failed':failed,'results':results,
+            'eligible_recipients':len(recipients),'accepted_or_queued':accepted,'failed':failed,'skipped_duplicates':skipped,'results':results,
             'delivery_note':'queued/sent is not delivery confirmation; delivered status is tracked separately.'}
 
 
@@ -1811,7 +1819,8 @@ def notification_channels():
     return {
         'command_center':{'status':'ACTIVE','delivery':'local database record'},
         'browser':{'status':'LOCAL_UI_ONLY','delivery':'requires user browser permission; not an external public warning'},
-        'sms':{'status':'READY' if cfg['sms']['ready'] else ('ENABLED_NOT_READY' if EXTERNAL_SMS_ENABLED else 'DISABLED'),'provider':cfg['provider'],'delivery':'Twilio delivery receipts/status are tracked','opted_in_recipients':sms_count},
+        'sms':{'status':'READY' if cfg['sms']['ready'] else ('ENABLED_NOT_READY' if EXTERNAL_SMS_ENABLED else 'DISABLED'),'provider':cfg['provider'],'delivery':'Twilio delivery receipts/status are tracked','opted_in_recipients':sms_count,
+               'issues':cfg['sms'].get('issues',[])},
         'active_recipients':total,'status_callback':cfg.get('status_callback'),
         'policy':'SMS messages are sent only after explicit ADMIN issue-and-notify action, only to ACTIVE opted-in recipients. A click is not treated as delivery confirmation.'
     }
