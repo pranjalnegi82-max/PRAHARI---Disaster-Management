@@ -13,10 +13,11 @@ async function run() {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-    const errors = [], requests = [];
-    let ready = false, recipients = 2, failed = false, refreshFails = false;
+    const errors = [], requests = [], drafts = [], dialogs = [];
+    let ready = false, recipients = 2, failed = false, refreshFails = false, draftSaveFails = false;
+    let advisories = [];
     page.on('pageerror', e => errors.push(e.message));
-    page.on('dialog', dialog => dialog.accept());
+    page.on('dialog', dialog => { dialogs.push(dialog.message()); dialog.accept(); });
     await page.addInitScript(() => {
       sessionStorage.setItem('prahari_portal', 'ADMIN');
       sessionStorage.setItem('prahari_operator_key', 'synthetic-test-only');
@@ -29,11 +30,22 @@ async function run() {
       let body = [];
       if (url.pathname === '/api/auth/status') body = { current_role: 'ADMIN', auth_required: true };
       else if (url.pathname === '/api/live/locations') body = [{ id: 1, name: 'Gangtok', state: 'Sikkim', lat: 27.33, lon: 88.61, data_state: 'CURRENT', risk_level: 'UNKNOWN', sources: [], factors: [] }];
-      else if (url.pathname === '/api/alerts') body = [{ id: 7, location_id: 1, location: 'Gangtok, Sikkim', level: 'HIGH', lifecycle_status: 'ISSUED', message: 'Synthetic test advisory only.', source: 'SYNTHETIC' }];
+      else if (url.pathname === '/api/alerts' && route.request().method() === 'POST') {
+        if (draftSaveFails) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Synthetic draft save unavailable.' }) });
+        const data = route.request().postDataJSON(); drafts.push(data);
+        const alert = { ...data, id: 7, location: 'Gangtok, Sikkim', lifecycle_status: 'DRAFT', advisory_type: 'MANUAL', source: 'admin-manual' };
+        advisories = [alert]; body = { ok: true, alert };
+      }
+      else if (url.pathname === '/api/alerts') body = advisories;
+      else if (url.pathname.endsWith('/transition')) {
+        advisories[0].lifecycle_status = route.request().postDataJSON().to_status;
+        body = { ok: true, alert: advisories[0] };
+      }
       else if (url.pathname === '/api/system/status') body = { api: 'online' };
-      else if (url.pathname.endsWith('/notification-preview')) body = { target_label: 'Gangtok, Sikkim', sms_recipients: recipients, provider: { sms: { ready, issues: ready ? [] : [setupIssue] } } };
+      else if (url.pathname.endsWith('/notification-preview')) body = { target_label: 'Gangtok, Sikkim', message: `PRAHARI | Gangtok, Sikkim\n${advisories[0].message}`, sms_recipients: recipients, provider: { sms: { ready, issues: ready ? [] : [setupIssue] } } };
       else if (url.pathname.endsWith('/issue-and-notify')) {
         requests.push(route.request().postDataJSON());
+        advisories[0].lifecycle_status = 'ISSUED';
         body = { accepted_or_queued: failed ? 0 : 1, failed: failed ? 1 : 0, skipped_duplicates: 1, target_label: 'Gangtok, Sikkim', results: failed ? [{ status: 'FAILED', error_code: '21608', error: 'Synthetic recipient is not verified.' }] : [{ status: 'QUEUED' }, { status: 'SKIPPED_DUPLICATE' }] };
       } else if (url.pathname.endsWith('/deliveries/refresh')) body = { deliveries: refreshFails ? [{ refresh_error: 'Synthetic provider status unavailable.' }] : [] };
       else if (url.pathname.endsWith('/deliveries')) body = [{ id: 1, recipient_id: 1, recipient_name: 'Synthetic recipient', status: failed ? 'FAILED' : 'QUEUED', error_code: failed ? '21608' : null, error_message: failed ? 'Synthetic recipient is not verified.' : null }];
@@ -42,7 +54,42 @@ async function run() {
     });
     await page.goto(base);
     await page.getByRole('button', { name: 'Reports & Alerts', exact: true }).click();
-    await page.getByRole('button', { name: /Advisory alerts/ }).click();
+    await page.getByRole('button', { name: 'Create advisory', exact: true }).click();
+    await page.getByRole('heading', { name: 'Create advisory draft', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Save draft', exact: true }).isDisabled(), true);
+    const writtenMessage = 'TEST ONLY: Synthetic custom message for the draft workflow.\nNo actual hazard is reported.';
+    await page.getByLabel('Advisory message').fill(writtenMessage);
+    await page.getByLabel('Advisory severity').selectOption('LOW');
+    await page.setViewportSize({ width: 320, height: 844 });
+    const overflow=await page.evaluate(() => ({width:innerWidth,scrollWidth:document.documentElement.scrollWidth,
+      elements:[...document.querySelectorAll('body *')].filter(el=>{const r=el.getBoundingClientRect();return r.width>0&&(r.right>innerWidth+1||r.left< -1);}).slice(0,12).map(el=>({tag:el.tagName,cls:el.className,text:el.textContent.slice(0,50),right:el.getBoundingClientRect().right}))}));
+    assert.equal(overflow.scrollWidth <= overflow.width + 1, true, JSON.stringify(overflow));
+    await page.screenshot({ path: path.join(out, 'advisory-composer-mobile-SYNTHETIC.png'), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.screenshot({ path: path.join(out, 'advisory-composer-desktop-SYNTHETIC.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    draftSaveFails = true;
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Synthetic draft save unavailable.' }).waitFor();
+    assert.equal(await page.getByLabel('Advisory message').inputValue(), writtenMessage);
+    draftSaveFails = false;
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.getByRole('status').filter({ hasText: 'Draft #7 saved.' }).waitFor();
+    assert.equal(drafts.length, 1);
+    assert.equal(drafts[0].message, writtenMessage);
+    assert.equal(drafts[0].level, 'LOW');
+    assert.equal(drafts[0].location_id, 1);
+    assert.equal(requests.length, 0, 'Saving a draft must not send any messages');
+    await page.getByRole('button', { name: 'Mark reviewed', exact: true }).click();
+    await page.getByRole('button', { name: 'Issue & send SMS', exact: true }).waitFor();
+    // First send includes the written message in the confirmation and is not a retry.
+    ready = true;
+    await page.getByRole('button', { name: 'Issue & send SMS', exact: true }).click();
+    await page.getByRole('status').filter({ hasText: '1 accepted/queued' }).waitFor();
+    assert.equal(requests[0].retry_failed, false);
+    assert.equal(dialogs[0].includes(writtenMessage), true);
+    requests.length = 0;
+    ready = false;
     const send = page.getByRole('button', { name: 'Send / retry SMS', exact: true });
     await send.click();
     await page.getByRole('alert').filter({ hasText: 'PRAHARI_SMS_ENABLED=true' }).waitFor();
@@ -83,7 +130,7 @@ async function run() {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: path.join(out, 'sms-setup-SYNTHETIC.png'), fullPage: true });
     assert.deepEqual(errors, []);
-    console.log('SMS browser regressions passed: retry request, configuration/recipient blockers, provider errors, delivery details, refresh failures, mobile layout. No real messages sent.');
+    console.log('Advisory/SMS browser regressions passed: empty-list composer, draft save/recovery, review, message preview, retry request, configuration/recipient blockers, provider errors, delivery details, refresh failures, mobile and desktop layouts. No real messages sent.');
   } finally { await browser.close(); }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

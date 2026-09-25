@@ -280,6 +280,80 @@ def _sms_test_recipient(client, phone='+919876543210'):
     return response.json()['recipient']['id']
 
 
+def test_manual_advisory_can_be_drafted_without_assessment_or_sms(monkeypatch, client):
+    monkeypatch.setattr(main, 'send_notification', lambda *a: pytest.fail('Saving a draft must not send SMS'))
+    response=client.post('/api/alerts', json={
+        'location_id':1, 'level':'LOW', 'message':'  TEST ONLY: This is a synthetic draft for workflow testing.  ',
+    })
+    assert response.status_code == 201
+    alert=response.json()['alert']
+    assert alert['lifecycle_status'] == 'DRAFT'
+    assert alert['advisory_type'] == 'MANUAL'
+    assert alert['source'] == 'admin-manual'
+    assert alert['risk_percent'] is None
+    assert alert['public_warning_issued'] is False
+    assert alert['location'] == 'Gangtok, Sikkim'
+    assert alert['message'] == 'TEST ONLY: This is a synthetic draft for workflow testing.'
+    assert client.get('/api/alerts').json()[0]['id'] == alert['id']
+    history=client.get(f"/api/alerts/{alert['id']}/history").json()['history']
+    assert history[0]['to_status'] == 'DRAFT'
+    assert history[0]['actor_role'] == 'DEV_OPERATOR'
+    with sqlite3.connect(TEST_DB) as con:
+        assert con.execute('SELECT COUNT(*) FROM assessments').fetchone()[0] == 0
+        assert con.execute('SELECT COUNT(*) FROM notification_deliveries').fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('role', ['PUBLIC','FIELD_OFFICER','OPERATOR','REVIEWER'])
+def test_manual_advisory_creation_is_admin_only(role, client):
+    main.app.dependency_overrides[main.resolve_role]=lambda: role
+    try:
+        response=client.post('/api/alerts', json={'location_id':1,'message':'Synthetic test draft only.'})
+        assert response.status_code == 403
+        assert client.get('/api/alerts').json() == []
+    finally:
+        main.app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize('payload,status', [
+    ({'location_id':999,'message':'Synthetic test draft only.'},400),
+    ({'location_id':1,'message':'            '},400),
+    ({'location_id':1,'message':'x'*501},422),
+    ({'location_id':1,'level':'FAKE','message':'Synthetic test draft only.'},422),
+])
+def test_invalid_manual_advisory_does_not_create_records(payload, status, client):
+    assert client.post('/api/alerts', json=payload).status_code == status
+    assert client.get('/api/alerts').json() == []
+
+
+def test_manual_advisory_review_and_sms_preserve_complete_written_message(monkeypatch, client):
+    message='TEST ONLY: '+'Synthetic content for a notification workflow. '*8+'अभ्यास संदेश।'
+    created=client.post('/api/alerts', json={'location_id':1,'message':message})
+    assert created.status_code == 201
+    aid=created.json()['alert']['id']
+    _sms_test_ready(monkeypatch)
+    for index,language in enumerate(('en','hi','as')):
+        assert client.post('/api/notification/recipients', json={
+            'name':'Synthetic recipient', 'phone_e164':f'+91987654321{index}',
+            'location_id':1, 'language':language, 'consent_confirmed':True,
+        }).status_code == 200
+    sent=[]
+    monkeypatch.setattr(main,'send_notification',lambda channel,to,body: (
+        sent.append(body) or {'sid':f'SMMANUAL{len(sent)}','status':'queued'}))
+    # Drafts require the existing review transition before any sending.
+    assert client.post(f'/api/alerts/{aid}/issue-and-notify',json={}).status_code == 409
+    assert not sent
+    reviewed=client.patch(f'/api/alerts/{aid}/transition',json={'to_status':'REVIEWED'})
+    assert reviewed.status_code == 200
+    preview=client.get(f'/api/alerts/{aid}/notification-preview').json()
+    assert preview['message'] == f'PRAHARI | Gangtok, Sikkim\n{message}'
+    assert len(preview['message']) > 300
+    result=client.post(f'/api/alerts/{aid}/issue-and-notify',json={})
+    assert result.status_code == 200
+    assert result.json()['accepted_or_queued'] == 3
+    assert sent == [preview['message']]*3
+    assert client.get('/api/alerts?language=hi').json()[0]['message'] == message
+
+
 @pytest.mark.parametrize('status', ['FAILED','UNDELIVERED','ERROR','CANCELED'])
 def test_sms_retry_only_retries_failed_deliveries(monkeypatch, client, status):
     aid=_make_reviewed_alert(client)

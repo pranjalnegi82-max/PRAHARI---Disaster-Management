@@ -47,6 +47,8 @@ Twilio delivery callbacks will use:
 
 ### If SMS is not arriving
 
+To draft a message directly, open **Reports & Alerts → Create advisory**. Choose an area and severity, write the message, and select **Save draft**. This works when the advisory list is empty and does not require an assessment. Only admins can create these drafts; they have no computed risk score. Saving does not send messages. Review the saved text, select **Mark reviewed**, then **Issue & send SMS**. The confirmation shows the message and recipient count. Administrator-written messages are sent as written, including to recipients with a different language preference; no automatic translation or truncation is applied.
+
 1. In **Data & Settings → Notification channels**, check the specific setup issues. `READY` means the backend has the required configuration; it does not verify the account, balance, sender permissions, or destination availability.
 2. Confirm the intended area has an ACTIVE, opted-in SMS recipient. Mark the advisory REVIEWED before using **Issue & send SMS**.
 3. Open **View SMS delivery details** and **Refresh delivery status**. PRAHARI shows the provider error code and message; `QUEUED` or `SENT` does not confirm receipt.

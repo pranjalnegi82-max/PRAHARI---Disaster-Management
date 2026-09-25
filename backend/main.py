@@ -588,6 +588,12 @@ class AlertTransition(BaseModel):
     note: str = Field(default='', max_length=500)
 
 
+class ManualAlertCreate(BaseModel):
+    location_id: int = Field(ge=1)
+    level: Literal['LOW','MODERATE','HIGH','CRITICAL'] = 'MODERATE'
+    message: str = Field(min_length=10, max_length=500)
+
+
 class NotificationRecipientCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     phone_e164: str = Field(min_length=8, max_length=16)
@@ -877,6 +883,9 @@ def _recipient_public(row):
 
 def _alert_broadcast_text(alert:dict, language:str='en', sms:bool=False) -> str:
     location=alert.get('location') or 'the selected area'; level=alert.get('level') or 'HIGH'
+    if alert.get('advisory_type')=='MANUAL':
+        # Preserve the reviewed message, including its language and complete instructions.
+        return f"PRAHARI | {location}\n{alert.get('message_en') or ''}"
     if language=='hi':
         text=f"PRAHARI सलाह: {location} में भूस्खलन का {level} जोखिम। संवेदनशील ढलानों/सड़कों से दूर रहें और अधिकृत स्थानीय निर्देशों का पालन करें।"
     elif language=='as':
@@ -1504,6 +1513,32 @@ def alerts(language:str="en", limit:int=50, lifecycle_status:Optional[str]=None)
     rows=con.execute(sql,params).fetchall(); con.close()
     return [localized_alert(r,language) for r in rows]
 
+
+@app.post('/api/alerts', status_code=201)
+def create_manual_advisory(body:ManualAlertCreate, role:str=Depends(resolve_role)):
+    require_role(role,'ADMIN')
+    location=next((x for x in LOCATIONS if x['id']==body.location_id),None)
+    if not location:
+        raise HTTPException(400,'Unknown alert area')
+    message=body.message.strip()
+    if len(message)<10:
+        raise HTTPException(400,'Write an advisory message of at least 10 non-padding characters')
+    now=int(time.time())
+    label=f"{location['name']}, {location['state']}"
+    con=db(); cur=con.cursor()
+    cur.execute("""INSERT INTO alerts(location_id,location,level,risk_percent,message_en,
+        source,acknowledged,created_at,lifecycle_status,advisory_type,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (body.location_id,label,body.level,None,message,'admin-manual',0,now,'DRAFT','MANUAL',now))
+    alert_id=cur.lastrowid
+    cur.execute("INSERT INTO alert_audit(alert_id,from_status,to_status,actor_role,note,created_at) VALUES(?,?,?,?,?,?)",
+                (alert_id,None,'DRAFT',role,'Administrator created a manual advisory draft',now))
+    cur.execute("INSERT INTO system_events(event_type,detail,created_at) VALUES(?,?,?)",
+                ('ALERT_DRAFT_CREATED',f'Manual advisory {alert_id} drafted by {role} for {label}',now))
+    con.commit(); row=cur.execute('SELECT * FROM alerts WHERE id=?',(alert_id,)).fetchone(); con.close()
+    return {'ok':True,'alert':localized_alert(row,'en')}
+
+
 @app.get('/api/alerts/{alert_id}/history')
 def alert_history(alert_id:int):
     con=db(); alert=con.execute('SELECT * FROM alerts WHERE id=?',(alert_id,)).fetchone()
@@ -1710,6 +1745,7 @@ def notification_preview(alert_id:int, scope:Literal['ALERT_AREA','SPECIFIC_AREA
         'alert_id':alert_id,'location':alert.get('location'),'level':alert.get('level'),'lifecycle_status':alert.get('lifecycle_status'),
         'broadcast_scope':scope,'target_location_id':target_location_id,'target_label':_broadcast_target_label(scope,alert,target_location_id),
         'eligible_recipients':len(recipients),'sms_recipients':len(recipients),
+        'message':_alert_broadcast_text(alert,'en',sms=True),
         'provider':cfg,'policy':'Only ACTIVE, explicitly opted-in civilians in the selected broadcast scope are eligible. Duplicate phone numbers are de-duplicated.'
     }
 
