@@ -88,3 +88,7 @@ TWILIO_VALIDATE_SIGNATURE = env_bool("PRAHARI_TWILIO_VALIDATE_SIGNATURE", True)
 MAX_UPLOAD_BYTES = int(os.getenv("PRAHARI_MAX_UPLOAD_BYTES", str(2 * 1024 * 1024)))
 
 DB_PATH = Path(os.getenv("PRAHARI_DB_PATH", str(BASE_DIR / "prahari.db"))).expanduser().resolve()
+
+
+# Backend secret only. A configured remote database never falls back to SQLite.
+DATABASE_URL = os.getenv("PRAHARI_DATABASE_URL", os.getenv("DATABASE_URL", "")).strip()

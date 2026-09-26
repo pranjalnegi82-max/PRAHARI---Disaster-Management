@@ -8,7 +8,6 @@ from typing import Optional, Literal
 from pathlib import Path
 import math
 import time
-import sqlite3
 import shutil
 import json
 import os
@@ -31,7 +30,9 @@ from ml.risk_engine import predict as ml_predict, status as ml_status
 from settings import (ALLOWED_ORIGINS, AUTH_REQUIRED, APP_ENV, ADMIN_KEY, WEATHER_TIMEOUT_SECONDS, WEATHER_CACHE_TTL_SECONDS,
                       WEATHER_STALE_MAX_SECONDS, EXTERNAL_SMS_ENABLED,
                       NOTIFICATION_PROVIDER, MAX_UPLOAD_BYTES, DB_PATH, FIELD_OFFICERS,
-                      FIELD_OFFICERS_CONFIG_ERROR, ENV_SOURCE)
+                      FIELD_OFFICERS_CONFIG_ERROR, ENV_SOURCE, DATABASE_URL)
+from database import connect as connect_database, insert_row, storage_status
+from database_schema import initialize_schema
 from auth import resolve_role, require_role, field_officer_for_key
 from risk_baseline import assess as baseline_assess, VERSION as BASELINE_VERSION
 from satellite_engine import status as l4s_status, infer_patch as l4s_infer_patch
@@ -159,7 +160,7 @@ def _cache_key_weather(location_id:int) -> str:
 
 def _persist_source_cache(cache_key:str, provider:str, payload:dict, valid_at=None):
     try:
-        con=db(); con.execute("INSERT OR REPLACE INTO source_cache(cache_key,provider,payload_json,fetched_at,valid_at) VALUES(?,?,?,?,?)",
+        con=db(); con.execute("INSERT INTO source_cache(cache_key,provider,payload_json,fetched_at,valid_at) VALUES(?,?,?,?,?) ON CONFLICT(cache_key) DO UPDATE SET provider=excluded.provider,payload_json=excluded.payload_json,fetched_at=excluded.fetched_at,valid_at=excluded.valid_at",
             (cache_key,provider,json.dumps(payload),int(time.time()),valid_at)); con.commit(); con.close()
     except Exception:
         pass
@@ -677,103 +678,11 @@ class AlertCreate(BaseModel):
 
 
 def db():
-    con = sqlite3.connect(DB)
-    con.row_factory = sqlite3.Row
-    return con
+    return connect_database(DB, DATABASE_URL)
 
 
 def init_db():
-    con = db()
-    cur = con.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS reports(
-        id INTEGER PRIMARY KEY AUTOINCREMENT, reporter TEXT, phone TEXT, location TEXT,
-        lat REAL, lon REAL, hazard_type TEXT DEFAULT 'Other', location_method TEXT DEFAULT 'manual',
-        severity TEXT, description TEXT, image_name TEXT, status TEXT, created_at INTEGER)""")
-    # Backwards-compatible migrations for databases created by earlier hackathon builds.
-    report_cols = {r[1] for r in cur.execute("PRAGMA table_info(reports)").fetchall()}
-    if 'hazard_type' not in report_cols:
-        cur.execute("ALTER TABLE reports ADD COLUMN hazard_type TEXT DEFAULT 'Other'")
-    if 'location_method' not in report_cols:
-        cur.execute("ALTER TABLE reports ADD COLUMN location_method TEXT DEFAULT 'manual'")
-    cur.execute("""CREATE TABLE IF NOT EXISTS alerts(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        location_id INTEGER,
-        location TEXT,
-        level TEXT,
-        risk_percent REAL,
-        message_en TEXT,
-        message_hi TEXT,
-        message_as TEXT,
-        recommended_action TEXT,
-        source TEXT,
-        acknowledged INTEGER DEFAULT 0,
-        acknowledged_at INTEGER,
-        created_at INTEGER
-    )""")
-    alert_cols = {r[1] for r in cur.execute("PRAGMA table_info(alerts)").fetchall()}
-    if 'acknowledged_at' not in alert_cols:
-        cur.execute("ALTER TABLE alerts ADD COLUMN acknowledged_at INTEGER")
-    cur.execute("""CREATE TABLE IF NOT EXISTS system_events(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        event_type TEXT,
-        detail TEXT,
-        created_at INTEGER
-    )""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS telemetry(
-        id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER, station_id TEXT,
-        rainfall_intensity REAL, soil_moisture REAL, tilt_deg REAL, vibration_g REAL,
-        pore_pressure_kpa REAL, displacement_mm REAL, battery_pct REAL, quality REAL,
-        source TEXT, created_at INTEGER
-    )""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS alert_feedback(
-        id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER, outcome TEXT, note TEXT, created_at INTEGER
-    )""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS source_cache(
-        cache_key TEXT PRIMARY KEY, provider TEXT, payload_json TEXT, fetched_at INTEGER, valid_at TEXT
-    )""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS assessments(
-        id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER, location TEXT, mode TEXT,
-        assessment_kind TEXT, risk_level TEXT, risk_score REAL, data_completeness REAL,
-        model_version TEXT, inputs_json TEXT, sources_json TEXT, result_json TEXT, created_at INTEGER
-    )""")
-    alert_cols = {r[1] for r in cur.execute("PRAGMA table_info(alerts)").fetchall()}
-    for col, ddl in [
-        ('lifecycle_status', "TEXT DEFAULT 'DRAFT'"),('advisory_type', "TEXT DEFAULT 'ADVISORY'"),
-        ('issued_at', 'INTEGER'),('resolved_at', 'INTEGER'),('updated_at', 'INTEGER')
-    ]:
-        if col not in alert_cols:
-            cur.execute(f"ALTER TABLE alerts ADD COLUMN {col} {ddl}")
-    cur.execute("""CREATE TABLE IF NOT EXISTS alert_audit(
-        id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER, from_status TEXT, to_status TEXT,
-        actor_role TEXT, note TEXT, created_at INTEGER
-    )""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS notification_recipients(
-        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone_e164 TEXT NOT NULL,
-        location_id INTEGER, language TEXT DEFAULT 'en', sms_enabled INTEGER DEFAULT 1,
-        whatsapp_enabled INTEGER DEFAULT 0, consent_status TEXT DEFAULT 'ACTIVE',
-        consent_at INTEGER, created_at INTEGER, updated_at INTEGER
-    )""")
-    recipient_cols = {r[1] for r in cur.execute("PRAGMA table_info(notification_recipients)").fetchall()}
-    for col, ddl in [
-        ('household_label', 'TEXT'), ('village', 'TEXT'), ('household_size', 'INTEGER'),
-        ('registered_by_role', "TEXT DEFAULT 'ADMIN'"), ('registered_by_officer', 'TEXT'),
-        ('registered_by_officer_code', 'TEXT'), ('registered_by_posting_location_id', 'INTEGER'),
-        ('registration_source', "TEXT DEFAULT 'ADMIN_PORTAL'")
-    ]:
-        if col not in recipient_cols:
-            cur.execute(f"ALTER TABLE notification_recipients ADD COLUMN {col} {ddl}")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_notification_recipients_location ON notification_recipients(location_id,consent_status)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_notification_recipients_officer ON notification_recipients(registered_by_officer_code,location_id)")
-    cur.execute("""CREATE TABLE IF NOT EXISTS notification_deliveries(
-        id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER NOT NULL, recipient_id INTEGER NOT NULL,
-        channel TEXT NOT NULL, provider TEXT, provider_message_sid TEXT, status TEXT NOT NULL,
-        error_code TEXT, error_message TEXT, attempted_at INTEGER, updated_at INTEGER,
-        delivered_at INTEGER, read_at INTEGER,
-        UNIQUE(alert_id,recipient_id,channel)
-    )""")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_notification_deliveries_alert ON notification_deliveries(alert_id,channel,status)")
-    con.commit()
-    con.close()
+    initialize_schema(db)
 
 
 init_db()
@@ -822,11 +731,11 @@ def create_alert(location_id, location, level, risk_percent, source="risk-engine
     if row:
         con.close(); return dict(row)
     msgs=alert_texts(location,level); now=int(time.time())
-    cur.execute("""INSERT INTO alerts(location_id,location,level,risk_percent,message_en,message_hi,message_as,
+    aid=insert_row(cur, """INSERT INTO alerts(location_id,location,level,risk_percent,message_en,message_hi,message_as,
         recommended_action,source,acknowledged,created_at,lifecycle_status,advisory_type,updated_at)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (location_id,location,level,risk_percent,msgs['en'],msgs['hi'],msgs['as'],action_for(level),source,0,now,'DRAFT','ADVISORY',now))
-    aid=cur.lastrowid
+
     cur.execute("INSERT INTO alert_audit(alert_id,from_status,to_status,actor_role,note,created_at) VALUES(?,?,?,?,?,?)",
                 (aid,None,'DRAFT','SYSTEM','Assessment created draft advisory; operator review required',now))
     cur.execute("INSERT INTO system_events(event_type,detail,created_at) VALUES(?,?,?)",('ALERT_DRAFT_CREATED',f'{level} draft advisory for {location}',now))
@@ -938,9 +847,9 @@ def _upsert_delivery(alert_id:int, recipient_id:int, channel:str, *, status:str,
                     (provider,sid,status,error_code,error_message,now,now,existing['id']))
         did=existing['id']
     else:
-        cur.execute("""INSERT INTO notification_deliveries(alert_id,recipient_id,channel,provider,provider_message_sid,status,error_code,error_message,attempted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        did=insert_row(cur, """INSERT INTO notification_deliveries(alert_id,recipient_id,channel,provider,provider_message_sid,status,error_code,error_message,attempted_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                     (alert_id,recipient_id,channel,provider,sid,status,error_code,error_message,now,now))
-        did=cur.lastrowid
+
     con.commit(); row=cur.execute("SELECT * FROM notification_deliveries WHERE id=?",(did,)).fetchone(); con.close(); return dict(row)
 
 
@@ -1282,6 +1191,7 @@ def status():
     return {
         "api":"online",
         "database":"online",
+        "database_storage":storage_status(DATABASE_URL, hosted=bool(os.getenv("RENDER"))),
         "risk_engine": ml_status().get("engine", "transparent-fallback"),
         "alert_engine":"draft-advisory-lifecycle; operator review required",
         "browser_notifications":"frontend-ready",
@@ -1396,10 +1306,10 @@ def live_diagnostics(location_id:int, force:bool=True, role:str=Depends(resolve_
 
 def _save_assessment(location_id:int, mode:str, result:dict) -> int:
     con=db(); cur=con.cursor(); now=int(time.time())
-    cur.execute("""INSERT INTO assessments(location_id,location,mode,assessment_kind,risk_level,risk_score,data_completeness,model_version,inputs_json,sources_json,result_json,created_at)
+    aid=insert_row(cur, """INSERT INTO assessments(location_id,location,mode,assessment_kind,risk_level,risk_score,data_completeness,model_version,inputs_json,sources_json,result_json,created_at)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",(location_id,f"{result['name']}, {result['state']}",mode,result.get('assessment_kind'),result.get('risk_level'),result.get('risk_percent'),result.get('data_completeness_pct'),result.get('assessment_version'),
         json.dumps({'rainfall_24h_mm':result.get('rainfall'),'antecedent_rainfall_72h_mm':result.get('antecedent_rainfall_72h'),'soil_wetness_pct':result.get('soil_moisture'),'slope_deg':result.get('slope')}),json.dumps(result.get('sources',[])),json.dumps(result),now))
-    aid=cur.lastrowid; con.commit(); con.close(); return aid
+    con.commit(); con.close(); return aid
 
 @app.post('/api/assessments/{location_id}')
 def run_assessment(location_id:int, mode:Literal['live','replay']='live', force:bool=False, role:str=Depends(resolve_role)):
@@ -1526,11 +1436,11 @@ def create_manual_advisory(body:ManualAlertCreate, role:str=Depends(resolve_role
     now=int(time.time())
     label=f"{location['name']}, {location['state']}"
     con=db(); cur=con.cursor()
-    cur.execute("""INSERT INTO alerts(location_id,location,level,risk_percent,message_en,
+    alert_id=insert_row(cur, """INSERT INTO alerts(location_id,location,level,risk_percent,message_en,
         source,acknowledged,created_at,lifecycle_status,advisory_type,updated_at)
         VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
         (body.location_id,label,body.level,None,message,'admin-manual',0,now,'DRAFT','MANUAL',now))
-    alert_id=cur.lastrowid
+
     cur.execute("INSERT INTO alert_audit(alert_id,from_status,to_status,actor_role,note,created_at) VALUES(?,?,?,?,?,?)",
                 (alert_id,None,'DRAFT',role,'Administrator created a manual advisory draft',now))
     cur.execute("INSERT INTO system_events(event_type,detail,created_at) VALUES(?,?,?)",
@@ -1641,7 +1551,7 @@ def field_register_household(body:FieldHouseholdCreate, x_prahari_key:Optional[s
     existing=cur.execute("SELECT id,consent_status FROM notification_recipients WHERE phone_e164=? AND location_id=?",(phone,location_id)).fetchone()
     if existing:
         con.close(); raise HTTPException(409,'This phone number is already registered for this alert area')
-    cur.execute("""INSERT INTO notification_recipients(
+    rid=insert_row(cur, """INSERT INTO notification_recipients(
         name,phone_e164,location_id,language,sms_enabled,whatsapp_enabled,consent_status,consent_at,created_at,updated_at,
         household_label,village,household_size,registered_by_role,registered_by_officer,registered_by_officer_code,
         registered_by_posting_location_id,registration_source
@@ -1649,7 +1559,7 @@ def field_register_household(body:FieldHouseholdCreate, x_prahari_key:Optional[s
         (body.name.strip(),phone,location_id,body.language,1,0,'ACTIVE',now,now,now,
          (body.household_label or '').strip() or None,(body.village or '').strip() or None,body.household_size,
          registered_by_role,registered_by_officer,registered_by_code,posting_id,source))
-    rid=cur.lastrowid
+
     detail=f'Civilian recipient {rid} registered for location {location_id} by {registered_by_role} {registered_by_officer or ""}'.strip()
     cur.execute("INSERT INTO system_events(event_type,detail,created_at) VALUES(?,?,?)",('FIELD_CIVILIAN_REGISTERED',detail,now))
     con.commit(); row=cur.execute("SELECT * FROM notification_recipients WHERE id=?",(rid,)).fetchone(); con.close()
@@ -1698,13 +1608,13 @@ def create_notification_recipient(body:NotificationRecipientCreate, role:str=Dep
     existing=cur.execute("SELECT id FROM notification_recipients WHERE phone_e164=? AND COALESCE(location_id,-1)=COALESCE(?,-1)",(phone,body.location_id)).fetchone()
     if existing:
         con.close(); raise HTTPException(409,'This phone number is already enrolled for the selected area')
-    cur.execute("""INSERT INTO notification_recipients(
+    rid=insert_row(cur, """INSERT INTO notification_recipients(
         name,phone_e164,location_id,language,sms_enabled,whatsapp_enabled,consent_status,consent_at,created_at,updated_at,
         household_label,village,household_size,registered_by_role,registration_source
         ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (body.name.strip(),phone,body.location_id,body.language,int(body.sms_enabled),0,'ACTIVE',now,now,now,
          (body.household_label or '').strip() or None,(body.village or '').strip() or None,body.household_size,'ADMIN','ADMIN_PORTAL'))
-    rid=cur.lastrowid
+
     cur.execute("INSERT INTO system_events(event_type,detail,created_at) VALUES(?,?,?)",('NOTIFICATION_RECIPIENT_ADDED',f'Recipient {rid} enrolled with explicit consent',now))
     con.commit(); row=cur.execute("SELECT * FROM notification_recipients WHERE id=?",(rid,)).fetchone(); con.close()
     return {'ok':True,'recipient':_recipient_public(row)}
@@ -2105,7 +2015,7 @@ async def create_report(
     con = db()
     cur = con.cursor()
     now = int(time.time())
-    cur.execute(
+    rid=insert_row(cur,
         """INSERT INTO reports(
             reporter,phone,location,lat,lon,hazard_type,location_method,severity,
             description,image_name,status,created_at
@@ -2113,7 +2023,7 @@ async def create_report(
         (reporter.strip(),phone.strip(),location.strip(),lat,lon,hazard_type,location_method,
          severity,description.strip(),image_name,"NEW",now)
     )
-    rid = cur.lastrowid
+
     con.commit()
     con.close()
     if severity in ("HIGH","CRITICAL"):
@@ -2340,9 +2250,9 @@ def response_plan(location_id:int):
 def ingest_telemetry(t:TelemetryInput, role:str=Depends(resolve_role)):
     require_role(role,'OPERATOR')
     x=_loc(t.location_id); now=int(time.time()); con=db(); cur=con.cursor()
-    cur.execute('INSERT INTO telemetry(location_id,station_id,rainfall_intensity,soil_moisture,tilt_deg,vibration_g,pore_pressure_kpa,displacement_mm,battery_pct,quality,source,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+    tid=insert_row(cur, 'INSERT INTO telemetry(location_id,station_id,rainfall_intensity,soil_moisture,tilt_deg,vibration_g,pore_pressure_kpa,displacement_mm,battery_pct,quality,source,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                 (t.location_id,t.station_id,t.rainfall_intensity,t.soil_moisture,t.tilt_deg,t.vibration_g,t.pore_pressure_kpa,t.displacement_mm,t.battery_pct,t.quality,t.source,now))
-    tid=cur.lastrowid; con.commit(); con.close()
+    con.commit(); con.close()
 
     # Transparent edge precursor screen. Only REAL_SENSOR may create an operational draft advisory.
     danger=0; reasons=[]
