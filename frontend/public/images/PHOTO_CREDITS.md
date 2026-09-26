@@ -1,22 +1,13 @@
-# PRAHARI terrain photographs
+# PRAHARI terrain photograph
 
-These photographs are decorative regional context, not current satellite imagery or hazard evidence.
+- File: `yumthang-valley.webp`
+- Photographer: nur alam (@_nur)
+- Location listed by photographer: Yumthang Valley, North Sikkim, India
+- Source: https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0
+- License: https://unsplash.com/license (free Unsplash License)
+- Retrieved: 2026-09-26
+- Download: https://images.unsplash.com/photo-1697999151917-5334d9d9de15?auto=format&fit=max&fm=webp&w=1920&q=80
 
-## Gangtok forest — overview banner
-- File: `gangtok-forest.webp`
-- Photographer: Upbeat Nomad
-- Location listed by photographer: Gangtok, Sikkim, India
-- Source: https://unsplash.com/photos/a-scenic-view-of-a-lush-green-forest-LEZkf_qXzpk
-- Download: https://images.unsplash.com/photo-1633323773495-42816a4e8920?auto=format&fit=max&fm=webp&w=1920&q=82
+The source page explicitly lists the free Unsplash License, which permits downloading, modifying, distributing and using photos, including commercially. Visible photographer attribution is retained on both pages.
 
-## North Sikkim mountains — login background
-- File: `north-sikkim-mountains.webp`
-- Photographer: Hrishikesh More
-- Location listed by photographer: North Sikkim, Sikkim, India
-- Source: https://unsplash.com/photos/misty-mountain-slopes-with-evergreen-trees-e35eWOMRyxk
-- Download: https://images.unsplash.com/photo-1776601797028-54c6bf7e8b3a?auto=format&fit=max&fm=webp&w=1920&q=82
-
-Both source pages list the free Unsplash License: https://unsplash.com/license
-Retrieved 2026-09-26. The license permits downloading, modifying, distributing, and using photographs, including commercially. Photographer attribution is retained in the interface and this file.
-
-Assets are served locally. WebP encoding and resizing come from Unsplash's image CDN. CSS controls cover cropping and contrast overlays; neither image contains generated terrain.
+The photograph is decorative regional context, not current satellite imagery or evidence of risk at the selected location. It is bundled and served locally, with no third-party image requests. WebP encoding/resizing comes from the Unsplash CDN; CSS controls cover cropping and contrast overlays. No terrain was AI-generated.
