@@ -77,8 +77,10 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
 /* Overview */
 .overview-page{display:flex;flex-direction:column;gap:18px}
 .overview-hero{position:relative;min-height:330px;border-radius:18px;overflow:hidden;background:
-  linear-gradient(90deg,rgba(5,24,42,.83) 0%,rgba(5,24,42,.62) 42%,rgba(5,24,42,.20) 73%,rgba(5,24,42,.10) 100%),
-  url('/prahari-hero.png') center/cover no-repeat;box-shadow:var(--shadow)}
+  linear-gradient(90deg,rgba(5,24,42,.86) 0%,rgba(5,24,42,.70) 42%,rgba(5,24,42,.18) 73%,rgba(5,24,42,.08) 100%),
+  url('/images/gangtok-forest.webp') center 73%/cover no-repeat;background-color:#123c38;box-shadow:var(--shadow)}
+.terrain-credit{margin:-10px 2px 0;color:var(--muted);font-size:10px;line-height:1.6;text-align:right}
+.terrain-credit a,.login-photo-credit a{color:inherit;text-decoration:underline;text-underline-offset:3px}
 .hero-overlay{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.02),rgba(0,0,0,.10));pointer-events:none}
 .hero-copy{position:relative;z-index:2;width:min(620px,62%);padding:42px 40px;color:#fff}
 .hero-kicker{display:inline-block;text-transform:uppercase;letter-spacing:.13em;font-size:10px;font-weight:800;color:#bcd9f7;margin-bottom:12px}
@@ -186,7 +188,8 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
 
 /* v9.5 role-separated portals */
 .login-shell{min-height:100vh;position:relative;overflow:hidden;background:#07192c;color:#fff;display:flex;flex-direction:column}
-.login-backdrop{position:absolute;inset:0;background:linear-gradient(105deg,rgba(5,22,39,.97) 0%,rgba(5,22,39,.86) 45%,rgba(5,22,39,.58) 100%),url('/prahari-hero.png') center/cover no-repeat;filter:saturate(.82)}
+.login-backdrop{position:absolute;inset:0;background:linear-gradient(105deg,rgba(5,22,39,.58) 0%,rgba(5,22,39,.32) 45%,rgba(5,22,39,.08) 100%),url('/images/north-sikkim-mountains.webp') center/cover no-repeat}
+.login-photo-credit{display:block;margin-top:5px;color:#c7d7e6;font-size:10px;line-height:1.6}
 .login-brand{position:relative;z-index:2;display:flex;align-items:center;gap:11px;padding:26px 34px}.login-brand .brand-symbol{width:42px;height:42px}.login-brand strong{display:block;font-size:18px;letter-spacing:.05em}.login-brand small{display:block;color:#9fb5ca;font-size:10px;margin-top:3px}
 .login-card-wrap{position:relative;z-index:2;flex:1;width:min(1180px,calc(100% - 48px));margin:20px auto 44px;display:grid;grid-template-columns:minmax(0,.95fr) minmax(420px,.75fr);gap:60px;align-items:center}
 .login-intro{padding:30px 0}.login-intro h1{font-size:54px;line-height:1;letter-spacing:-.05em;margin:8px 0 18px;max-width:650px}.login-intro>p{max-width:610px;color:#c7d6e4;font-size:15px;line-height:1.7;margin:0}.login-safety{margin-top:28px;display:flex;align-items:flex-start;gap:10px;max-width:560px;padding:13px 15px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);border-radius:11px;color:#c3d1df;font-size:11px;line-height:1.5;backdrop-filter:blur(8px)}
@@ -387,3 +390,13 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
 .sms-draft-preview p,.advisory-message{white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:650px){.report-page-actions .btn{flex:1}}
 @media(max-width:400px){.reports-alerts-page .subnav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.reports-alerts-page .subnav button{min-width:0;flex-wrap:wrap;gap:4px;padding:9px 5px;font-size:12px}}
+
+/* Keep the assessment below both hero actions on narrow screens. */
+@media(max-width:900px){
+  .hero-copy{padding:32px 30px 24px}
+  .hero-risk-card{position:relative;inset:auto;width:auto;margin:0 24px 24px}
+}
+@media(max-width:650px){
+  .hero-copy{padding:28px 22px 24px}
+  .hero-risk-card{margin:0 12px 12px}
+}
