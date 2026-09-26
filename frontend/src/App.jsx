@@ -170,7 +170,7 @@ function PortalLogin({onAuthenticated,initialPortal='ADMIN'}) {
         </form>
       </section>
     </main>
-    <footer className="login-footer">PRAHARI · Role-separated operational access · SIH26001</footer>
+    <footer className="login-footer">PRAHARI · Role-separated operational access · SIH26001<span className="login-photo-credit">Yumthang Valley, Sikkim · Photo by <a href="https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0" target="_blank" rel="noreferrer">nur alam / Unsplash</a></span></footer>
   </div>;
 }
 
@@ -435,6 +435,8 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
         <button className="text-link hero-link" onClick={()=>onNavigate('Risk Map')}>View location details <Icon name="arrow" size={15}/></button>
       </div>
     </section>
+
+    <p className="terrain-credit">Yumthang Valley, Sikkim · Photo by <a href="https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0" target="_blank" rel="noreferrer">nur alam / Unsplash</a></p>
 
     <section className="summary-strip" aria-label="Current observation summary">
       <StatCard icon="alert" label="Current risk" value={RISK[riskLevel]?.label || 'Unknown'} unit="" detail={location.risk_percent == null ? 'Insufficient data' : `${fmt(location.risk_percent,0)}/100 screening index`} tone={riskLevel==='LOW'?'green':riskLevel==='MODERATE'?'amber':riskLevel==='UNKNOWN'?'blue':'red'}/>
