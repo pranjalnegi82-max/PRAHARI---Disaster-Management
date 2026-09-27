@@ -167,6 +167,15 @@ def test_admin_gate_and_preview_does_not_send(factory,monkeypatch):
     assert not out.json()['ready']
     assert c.post('/api/broadcasts',json=body).status_code==503
     assert rows(factory)==[]
+    monkeypatch.setattr(api,'BROADCAST_ENABLED',True)
+    monkeypatch.setattr(api,'DATABASE_URL','configured-test-database')
+    monkeypatch.setattr(api,'production_account_status',lambda:{'ready':True,'issues':[],'account_type':'Full'})
+    b.claim(factory,1)  # Heartbeat only; there are no queued items yet.
+    assert c.post('/api/broadcasts/preview',json=body).json()['ready']
+    assert c.post('/api/broadcasts',json={**body,'expected_recipients':1000000}).status_code==409
+    assert c.post('/api/broadcasts',json=body).status_code==202
+    assert len(rows(factory))==3
+    assert c.post('/api/broadcasts',json=body).status_code==409
 
 
 def test_large_audience_is_queued_without_provider_calls(factory):

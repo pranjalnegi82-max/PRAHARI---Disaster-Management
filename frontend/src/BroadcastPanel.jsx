@@ -35,6 +35,7 @@ export default function BroadcastPanel({alerts, locations, onRefresh}) {
       <button className="btn btn-secondary" disabled={busy||!form.alert_id}>{busy?'Please wait…':'Preview broadcast'}</button>
     </form>
     {preview&&<div className="record-card"><h3>{preview.recipients.toLocaleString()} eligible numbers</h3><p>{preview.target_label} · Duplicate numbers and previous attempts are excluded.</p>
+      {preview.minimum_submission_seconds!=null&&<p>Submission needs at least {Math.ceil(preview.minimum_submission_seconds/60).toLocaleString()} minutes at the configured rate. Provider delays and worker capacity can increase this; it is not a delivery-time guarantee.</p>}
       {[...new Set(Object.values(preview.messages))].map((m,i)=><div className="sms-draft-preview" key={i}><strong>Message {i+1}</strong><p style={{whiteSpace:'pre-wrap'}}>{m}</p></div>)}
       <p className="fine">The registry language determines the message. Long or multilingual texts may cost multiple SMS segments. No recipient verification step is added by PRAHARI.</p>
       {!!preview.issues?.length&&<div className="notice notice-warn"><ul>{preview.issues.map(x=><li key={x}>{x}</li>)}</ul></div>}

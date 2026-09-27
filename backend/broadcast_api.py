@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from auth import resolve_role, require_role
 import broadcasts
 from notifications import production_account_status
-from settings import BROADCAST_ENABLED, DATABASE_URL
+from settings import BROADCAST_ENABLED, DATABASE_URL, BROADCAST_REQUESTS_PER_SECOND
 
 
 class BroadcastRequest(BaseModel):
@@ -66,7 +66,11 @@ def routes(connect, locations, make_text):
     def preview(body: BroadcastRequest, role: str = Depends(resolve_role)):
         admin(role); alert, target, label = context(body)
         issues, provider = ready()
-        return {'recipients': broadcasts.preview(connect, body.alert_id, body.scope, target),
+        recipients = broadcasts.preview(connect, body.alert_id, body.scope, target)
+        seconds = recipients / BROADCAST_REQUESTS_PER_SECOND
+        if seconds > body.expires_in_minutes * 60:
+            issues.append('The audience exceeds the configured submission capacity before expiry. Increase the expiry or provision sufficient worker/provider throughput.')
+        return {'recipients': recipients, 'minimum_submission_seconds': seconds,
                 'target_label': label, 'messages': {lang: make_text(alert, lang, sms=True) for lang in ('en','hi','as')},
                 'issues': issues, 'ready': not issues, 'provider': provider,
                 'note': 'Unique opted-in numbers; previous attempts excluded. Final billing depends on SMS segments and provider rates.'}
@@ -77,6 +81,8 @@ def routes(connect, locations, make_text):
         issues, _ = ready()
         if issues:
             raise HTTPException(503, ' '.join(issues))
+        if body.expected_recipients / BROADCAST_REQUESTS_PER_SECOND > body.expires_in_minutes * 60:
+            raise HTTPException(409, 'The audience cannot fit within the selected expiry at the configured submission rate. Preview again after changing capacity or expiry.')
         try:
             return broadcasts.enqueue(connect, body.alert_id, body.scope, target, label,
                 {lang: make_text(alert, lang, sms=True) for lang in ('en','hi','as')},

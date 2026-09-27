@@ -148,6 +148,7 @@ async function run() {
     await page.getByRole('status').filter({hasText:'100,000 messages queued'}).waitFor();
     assert.equal(bulkQueued,1);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
+    await page.evaluate(()=>window.scrollTo(0,0));
     await page.screenshot({path:path.join(out,'bulk-broadcast-mobile-SYNTHETIC.png'),fullPage:true});
     await page.setViewportSize({width:1440,height:1000});
     await page.screenshot({path:path.join(out,'bulk-broadcast-desktop-SYNTHETIC.png'),fullPage:true});

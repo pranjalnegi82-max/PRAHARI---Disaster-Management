@@ -62,7 +62,8 @@ This is a durable broadcast foundation, not a proven lakh-per-minute delivery
 service. A 100,003-recipient synthetic database test verifies queuing without
 sending anything. It does not measure mobile-network delivery. At the default
 1 request/second, 100,000 submissions take at least 27.8 hours; a 60-minute expiry
-will expire the unsent remainder. Obtain sufficient provider segment throughput,
+is rejected by the preview/capacity check. Actual processing can still be slower
+and unsent messages expire. Obtain sufficient provider segment throughput,
 size worker capacity, and choose an appropriate expiry for real operation. Multi-
 segment and multilingual messages cost more and consume more provider capacity.
 The worker makes serial network calls; multiple workers can improve concurrency
