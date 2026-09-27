@@ -6,27 +6,17 @@
 
 ```mermaid
 flowchart TB
-  subgraph Sources[Inputs]
-    W["Open-Meteo observations"]
-    F["Field reports and registered sensors"]
-    S["Earth Search Sentinel-2 scenes"]
-  end
-  subgraph Product[PRAHARI]
-    UI["React admin and field portals"]
-    API["FastAPI: assessment, evidence and advisories"]
-    DB[("PostgreSQL: records and SMS outbox")]
-    BW["Bulk SMS worker: gated"]
-    SAT["Experimental satellite processing"]
-  end
-  G["MSG91 Flow API and delivery webhook"]
-  UI --> API
-  W --> API
-  F --> API
-  S --> SAT --> API
-  API <--> DB
-  BW <--> DB
-  BW --> G --> API
+  UI["Admin and field portals"] --> API["FastAPI: assess and review"]
+  W["Weather observations"] --> API
+  F["Field reports and sensors"] --> API
+  S["Sentinel-2 scenes"] --> SAT["Satellite research"] --> API
+  API --> DB[("PostgreSQL records and SMS queue")]
+  DB --> BW["SMS worker: gated"] --> G["MSG91 Flow API"]
 ```
+
+MSG91 sends delivery reports back to an authenticated FastAPI webhook, which
+updates the corresponding queue record in PostgreSQL. The separate downward
+path makes clear that a screening assessment does not itself send an SMS.
 
 The deployed React site and FastAPI server are separate Render services. The hosted database uses external PostgreSQL (Neon); SQLite is for local development only. The repository's `render.yaml` defines the static site and a free web API, **not** an always-on SMS worker or a satellite inference service. The broadcast feature flag is off by default. This diagram shows integration boundaries, not evidence that every external component is configured live.
 
