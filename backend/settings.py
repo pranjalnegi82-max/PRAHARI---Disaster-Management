@@ -92,3 +92,7 @@ DB_PATH = Path(os.getenv("PRAHARI_DB_PATH", str(BASE_DIR / "prahari.db"))).expan
 
 # Backend secret only. A configured remote database never falls back to SQLite.
 DATABASE_URL = os.getenv("PRAHARI_DATABASE_URL", os.getenv("DATABASE_URL", "")).strip()
+
+# Enable on both API and a separate always-on worker after production SMS setup.
+BROADCAST_ENABLED = env_bool("PRAHARI_BROADCAST_ENABLED", False)
+BROADCAST_REQUESTS_PER_SECOND = max(0.1, min(100.0, float(os.getenv("PRAHARI_BROADCAST_REQUESTS_PER_SECOND", "1"))))

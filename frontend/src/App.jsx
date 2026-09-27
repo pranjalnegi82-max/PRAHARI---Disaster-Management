@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, CircleMarker, Popup, GeoJSON, useMap } from 'r
 import { API, downloadUrl, get, patch, post, postForm, getOperatorKey, setOperatorKey, getPortalSession, setPortalSession, clearPortalSession, loginPortal } from './api.js';
 
 import SatelliteIntelligence from './SatelliteIntelligence.jsx';
+import BroadcastPanel from './BroadcastPanel.jsx';
 
 const RISK = {
   LOW: { label: 'Low', cls: 'risk-low' },
@@ -597,10 +598,10 @@ function ReportsAlerts({reports,alerts,selected,locations,auth,onRefresh}) {
   function openComposer(){setDraftNotice('');setTab('alerts');setComposeOpen(true);}
   async function draftCreated(alert){setComposeOpen(false);setTab('alerts');setDraftNotice(`Draft #${alert.id} saved. Review the message below, then select Mark reviewed to enable SMS sending.`);await onRefresh();}
   return <div className="reports-alerts-page"><div className="page-title"><div><h1>Reports & Alerts</h1><p>Field evidence, civilian enrollment and advisory delivery remain traceable and role-controlled.</p></div><div className="report-page-actions">{isAdmin&&<button type="button" className="btn btn-primary" aria-expanded={composeOpen&&tab==='alerts'} aria-controls="advisory-composer" onClick={openComposer}>Create advisory</button>}<button className="btn btn-secondary" onClick={onRefresh}>Refresh</button></div></div>
-    <div className="subnav"><button className={tab==='reports'?'active':''} onClick={()=>setTab('reports')}>Citizen reports <Badge>{reports.length}</Badge></button>{canEnroll&&<button className={tab==='enrollment'?'active':''} onClick={()=>setTab('enrollment')}>Civilian enrollment</button>}<button className={tab==='alerts'?'active':''} onClick={()=>setTab('alerts')}>Advisory alerts <Badge>{alerts.length}</Badge></button></div>
+    <div className="subnav"><button className={tab==='reports'?'active':''} onClick={()=>setTab('reports')}>Citizen reports <Badge>{reports.length}</Badge></button>{canEnroll&&<button className={tab==='enrollment'?'active':''} onClick={()=>setTab('enrollment')}>Civilian enrollment</button>}<button className={tab==='alerts'?'active':''} onClick={()=>setTab('alerts')}>Advisory alerts <Badge>{alerts.length}</Badge></button>{isAdmin&&<button className={tab==='broadcasts'?'active':''} onClick={()=>setTab('broadcasts')}>Bulk broadcasts</button>}</div>
     {tab==='alerts'&&isAdmin&&composeOpen&&<AdvisoryComposer selected={selected} locations={locations} onCreated={draftCreated} onCancel={()=>setComposeOpen(false)}/>}
     {tab==='alerts'&&draftNotice&&<div className="notice notice-warn draft-saved-notice" role="status">{draftNotice}</div>}
-    {tab==='reports'?<ReportsPane reports={reports} selected={selected} onRefresh={onRefresh}/>:tab==='enrollment'?<CivilianEnrollmentPane auth={auth} locations={locations} selected={selected}/>:<AlertsPane alerts={alerts} auth={auth} locations={locations} onRefresh={onRefresh}/>} 
+    {tab==='broadcasts'&&isAdmin?<BroadcastPanel alerts={alerts} locations={locations} onRefresh={onRefresh}/>:tab==='reports'?<ReportsPane reports={reports} selected={selected} onRefresh={onRefresh}/>:tab==='enrollment'?<CivilianEnrollmentPane auth={auth} locations={locations} selected={selected}/>:<AlertsPane alerts={alerts} auth={auth} locations={locations} onRefresh={onRefresh}/>} 
   </div>;
 }
 
@@ -738,10 +739,11 @@ function AlertsPane({alerts,auth,locations,onRefresh}) {
       <div className="record-actions">
         {nextActions(a).map(to=><button disabled={!!busy} key={to} className={to==='ISSUED'?'btn btn-primary small':'btn btn-secondary small'} onClick={()=>transition(a,to)}>{to==='REVIEWED'?'Mark reviewed':to==='ISSUED'?'Issue internally':to==='ACKNOWLEDGED'?'Acknowledge':to==='RESOLVED'?'Resolve':to}</button>)}
         {isAdmin && ['REVIEWED','ISSUED'].includes(a.lifecycle_status) && <label className="alert-target"><span>SMS area</span><select value={targetByAlert[a.id] ?? String(a.location_id ?? 'ALL')} onChange={e=>setTargetByAlert(m=>({...m,[a.id]:e.target.value}))}><option value="ALL">All monitored areas</option>{locations.map(x=><option key={x.id} value={x.id}>{x.name}, {x.state}{x.id===a.location_id?' · alert area':''}</option>)}</select></label>}
-        {isAdmin && ['REVIEWED','ISSUED'].includes(a.lifecycle_status) && <button disabled={!!busy} className="btn btn-danger small" onClick={()=>issueAndNotify(a)}>{busy===`${a.id}-notify`?'Sending…':a.lifecycle_status==='REVIEWED'?'Issue & send SMS':'Send / retry SMS'}</button>}
+        {isAdmin && !a.broadcast_queue_enabled && ['REVIEWED','ISSUED'].includes(a.lifecycle_status) && <button disabled={!!busy} className="btn btn-danger small" onClick={()=>issueAndNotify(a)}>{busy===`${a.id}-notify`?'Sending…':a.lifecycle_status==='REVIEWED'?'Issue & send SMS':'Send / retry SMS'}</button>}
         {isAdmin && a.lifecycle_status==='ISSUED' && <button disabled={!!busy} className="btn btn-ghost small" onClick={()=>refreshDelivery(a)}>Refresh delivery status</button>}
         {isAdmin && ['ISSUED','ACKNOWLEDGED','RESOLVED'].includes(a.lifecycle_status) && <button disabled={!!busy} className="btn btn-ghost small" onClick={()=>showDeliveries(a)}>View SMS delivery details</button>}
       </div>
+      {isAdmin&&a.broadcast_queue_enabled&&['REVIEWED','ISSUED'].includes(a.lifecycle_status)&&<p className="fine">Open Bulk broadcasts to preview the audience and queue this advisory.</p>}
       {deliveryByAlert[a.id]&&<div className="sms-delivery-list" aria-label="SMS delivery details">{deliveryByAlert[a.id].length?deliveryByAlert[a.id].map(d=><div className="sms-delivery-row" key={d.id}><strong>{d.recipient_name||`Recipient #${d.recipient_id}`}</strong><span>{d.status}{d.error_code?` · Twilio ${d.error_code}`:''}</span>{d.error_message&&<span>{d.error_message}</span>}{/^\d+$/.test(String(d.error_code||''))&&<a href={`https://www.twilio.com/docs/api/errors/${d.error_code}`} target="_blank" rel="noreferrer">Error explanation</a>}</div>):<p className="fine">No SMS attempts recorded for this advisory.</p>}</div>}
       {a.channels&&<details><summary>Delivery channels</summary><div className="channel-list">{Object.entries(a.channels).map(([k,v])=><span key={k}><strong>{k}</strong>: {v.status}{v.delivered?` · ${v.delivered} delivered`:''}{v.accepted_or_sent?` · ${v.accepted_or_sent} queued/sent`:''}{v.failed?` · ${v.failed} failed`:''}{v.confirmed_delivery?' · provider confirmed':''}</span>)}</div><p className="fine">{a.delivery_note}</p></details>}
     </article>):<Empty title="No advisories" detail={isAdmin?'Select Create advisory above to write a draft. Recorded high/critical assessments can also create drafts.':'Recorded high/critical assessments can create draft advisories.'}/>}</div>

@@ -83,7 +83,28 @@ def _client():
     if not status["credentials_configured"]:
         raise NotificationConfigError("Twilio credentials are not configured")
     Client, _ = _twilio_imports()
-    return Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    from twilio.http.http_client import TwilioHttpClient
+    return Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN,
+                  http_client=TwilioHttpClient(timeout=20, max_retries=0))
+
+
+def production_account_status() -> dict[str, Any]:
+    """Read account metadata only; never sends a test message or exposes secrets."""
+    cfg = config_status()
+    issues = list(cfg['sms']['issues'])
+    account_type = 'UNKNOWN'
+    if not issues:
+        try:
+            account = _client().api.v2010.accounts(TWILIO_ACCOUNT_SID).fetch()
+            account_type = account.type
+            if account_type != 'Full':
+                issues.append('Bulk SMS requires an upgraded Twilio account and approved compliance profile. Trial accounts restrict recipients to verified numbers.')
+            if account.status != 'active':
+                issues.append('The SMS provider account is not active.')
+        except Exception:
+            issues.append('Could not verify the SMS account. Check backend credentials and provider availability.')
+    return {'account_type': account_type, 'ready': not issues, 'issues': issues,
+            'note': 'Full account status does not confirm sender, country permissions, compliance approval or available credit.'}
 
 
 def _create_message_kwargs(to: str, body: str, channel: str) -> dict[str, Any]:
