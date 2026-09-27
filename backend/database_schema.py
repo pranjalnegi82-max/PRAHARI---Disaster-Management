@@ -94,6 +94,8 @@ def initialize_schema(connect):
             UNIQUE(alert_id,recipient_id,channel)
         )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_notification_deliveries_alert ON notification_deliveries(alert_id,channel,status)")
+        from broadcasts import initialize_broadcast_schema
+        initialize_broadcast_schema(cur)
         con.commit()
     except Exception:
         con.rollback()

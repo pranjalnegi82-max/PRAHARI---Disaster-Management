@@ -30,7 +30,7 @@ from ml.risk_engine import predict as ml_predict, status as ml_status
 from settings import (ALLOWED_ORIGINS, AUTH_REQUIRED, APP_ENV, ADMIN_KEY, WEATHER_TIMEOUT_SECONDS, WEATHER_CACHE_TTL_SECONDS,
                       WEATHER_STALE_MAX_SECONDS, EXTERNAL_SMS_ENABLED,
                       NOTIFICATION_PROVIDER, MAX_UPLOAD_BYTES, DB_PATH, FIELD_OFFICERS,
-                      FIELD_OFFICERS_CONFIG_ERROR, ENV_SOURCE, DATABASE_URL)
+                      FIELD_OFFICERS_CONFIG_ERROR, ENV_SOURCE, DATABASE_URL, BROADCAST_ENABLED)
 from database import connect as connect_database, insert_row, storage_status
 from database_schema import initialize_schema
 from auth import resolve_role, require_role, field_officer_for_key
@@ -748,10 +748,14 @@ def seed_baseline_alerts():
 def _delivery_summary(alert_id:int) -> dict:
     con=db()
     rows=con.execute("SELECT channel,status,COUNT(*) c FROM notification_deliveries WHERE alert_id=? GROUP BY channel,status",(alert_id,)).fetchall()
+    bulk=con.execute("SELECT status,COUNT(*) c FROM broadcast_items WHERE alert_id=? GROUP BY status",(alert_id,)).fetchall()
     con.close()
     summary={'sms':{}}
     for r in rows:
         summary.setdefault(r['channel'],{})[str(r['status']).upper()]=r['c']
+    for r in bulk:
+        key=str(r['status']).upper()
+        summary['sms'][key]=summary['sms'].get(key,0)+r['c']
     return summary
 
 
@@ -777,6 +781,7 @@ def localized_alert(row, language="en"):
         'browser':{'status':'LOCAL_UI_ONLY','confirmed_delivery':False},
         'sms':channel_state('sms',EXTERNAL_SMS_ENABLED),
     }
+    d['broadcast_queue_enabled']=BROADCAST_ENABLED
     d['public_warning_issued']=bool(d.get('issued_at'))
     d['delivery_note']='External delivery is confirmed only from provider delivery/read status, never from a button click.'
     for k in ('message_en','message_hi','message_as'): d.pop(k,None)
@@ -1673,6 +1678,8 @@ def alert_deliveries(alert_id:int, role:str=Depends(resolve_role)):
 @app.post('/api/alerts/{alert_id}/issue-and-notify')
 def issue_and_notify(alert_id:int, body:AlertBroadcastRequest, role:str=Depends(resolve_role)):
     require_role(role,'ADMIN')
+    if BROADCAST_ENABLED:
+        raise HTTPException(409,'Use Reports & Alerts → Bulk broadcasts. Synchronous sending is disabled in broadcast mode.')
     con=db(); row=con.execute('SELECT * FROM alerts WHERE id=?',(alert_id,)).fetchone(); con.close()
     if not row: raise HTTPException(404,'Alert not found')
     alert=dict(row); current=alert.get('lifecycle_status') or 'DRAFT'
@@ -1683,6 +1690,8 @@ def issue_and_notify(alert_id:int, body:AlertBroadcastRequest, role:str=Depends(
     if body.scope=='SPECIFIC_AREA' and body.target_location_id is None:
         raise HTTPException(400,'target_location_id is required for SPECIFIC_AREA')
     recipients=_eligible_recipients(alert,body.scope,body.target_location_id)
+    if len(recipients)>100:
+        raise HTTPException(409,'Use Bulk broadcasts for audiences larger than 100 recipients.')
     if not recipients:
         raise HTTPException(409,'No ACTIVE opted-in SMS recipients are enrolled for the selected area')
     cfg=notification_config_status()
@@ -1752,6 +1761,8 @@ async def twilio_status_callback(request:Request):
         raise HTTPException(403,'Invalid Twilio webhook signature')
     sid=data.get('MessageSid') or data.get('SmsSid'); status=data.get('MessageStatus') or data.get('SmsStatus') or 'UNKNOWN'
     if sid:
+        from broadcasts import record_status
+        record_status(db,sid,status,data.get('ErrorCode'))
         _record_provider_status(sid,status,data.get('ErrorCode'),data.get('ChannelStatusMessage'))
     return Response(status_code=204)
 
@@ -2480,3 +2491,7 @@ def geofence_check(lat:float=Query(...,ge=-90,le=90), lon:float=Query(...,ge=-18
     return {'lat':lat,'lon':lon,'radius_km':radius_km,'inside_monitored_geofence':bool(nearby),'danger_nearby':bool(danger),'nearby':nearby,
             'message':('Dangerous monitored zone nearby — follow the listed action and official authority instructions.' if danger else 'No HIGH/CRITICAL PRAHARI monitored zone found within the selected radius.'),
             'note':'Geo-fence is a prototype location-targeting aid, not an official evacuation boundary.'}
+
+
+from broadcast_api import routes as broadcast_routes
+app.include_router(broadcast_routes(db, LOCATIONS, _alert_broadcast_text))

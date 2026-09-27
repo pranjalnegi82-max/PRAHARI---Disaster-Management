@@ -11,7 +11,7 @@ import sqlite3
 TABLES = (
     'reports', 'alerts', 'system_events', 'telemetry', 'alert_feedback',
     'source_cache', 'assessments', 'alert_audit', 'notification_recipients',
-    'notification_deliveries',
+    'notification_deliveries', 'broadcast_jobs', 'broadcast_items', 'broadcast_runtime',
 )
 _SQL_TOKENS = re.compile(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|--[^\n]*|/\*[\s\S]*?\*/|\?")
 

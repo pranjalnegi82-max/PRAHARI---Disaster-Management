@@ -16,6 +16,7 @@ async function run() {
     const errors = [], requests = [], drafts = [], dialogs = [];
     let ready = false, recipients = 2, failed = false, refreshFails = false, draftSaveFails = false;
     let advisories = [];
+    let bulkReady=false, bulkQueued=0;
     page.on('pageerror', e => errors.push(e.message));
     page.on('dialog', dialog => { dialogs.push(dialog.message()); dialog.accept(); });
     await page.addInitScript(() => {
@@ -28,7 +29,10 @@ async function run() {
         return url.origin === new URL(base).origin ? route.continue() : route.abort();
       }
       let body = [];
-      if (url.pathname === '/api/auth/status') body = { current_role: 'ADMIN', auth_required: true };
+      if (url.pathname === '/api/broadcasts/preview') body={recipients:100000,target_label:'All monitored areas',messages:{en:'TEST ONLY: Synthetic broadcast.'},issues:bulkReady?[]:['Synthetic trial account restriction'],ready:bulkReady};
+      else if (url.pathname === '/api/broadcasts' && route.request().method()==='POST') {bulkQueued++;assert.equal(route.request().postDataJSON().scope,'ALL_MONITORED');assert.equal(route.request().postDataJSON().expected_recipients,100000);body={id:1,queued:100000};}
+      else if (url.pathname === '/api/broadcasts') body={enabled:bulkReady,worker_online:bulkReady,jobs:bulkQueued?[{id:1,alert_id:7,target_label:'All monitored areas',status:'RUNNING',total:100000,expires_at:Math.floor(Date.now()/1000)+3600,counts:{READY:99999,DELIVERED:1}}]:[]};
+      else if (url.pathname === '/api/auth/status') body = { current_role: 'ADMIN', auth_required: true };
       else if (url.pathname === '/api/live/locations') body = [{ id: 1, name: 'Gangtok', state: 'Sikkim', lat: 27.33, lon: 88.61, data_state: 'CURRENT', risk_level: 'UNKNOWN', sources: [], factors: [] }];
       else if (url.pathname === '/api/alerts' && route.request().method() === 'POST') {
         if (draftSaveFails) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Synthetic draft save unavailable.' }) });
@@ -129,6 +133,24 @@ async function run() {
     await page.getByText(setupIssue, { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: path.join(out, 'sms-setup-SYNTHETIC.png'), fullPage: true });
+    await page.getByRole('button',{name:'Reports & Alerts',exact:true}).click();
+    await page.getByRole('button',{name:'Bulk broadcasts',exact:true}).click();
+    await page.getByLabel('Reviewed advisory').selectOption('7');
+    await page.getByLabel('Broadcast audience').selectOption('ALL');
+    await page.getByRole('button',{name:'Preview broadcast',exact:true}).click();
+    await page.getByText('Synthetic trial account restriction',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Issue & queue broadcast'}).isDisabled(),true);
+    assert.equal(bulkQueued,0);
+    bulkReady=true;
+    await page.getByRole('button',{name:'Preview broadcast',exact:true}).click();
+    await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Issue & queue broadcast'&&!b.disabled));
+    await page.getByRole('button',{name:'Issue & queue broadcast'}).click();
+    await page.getByRole('status').filter({hasText:'100,000 messages queued'}).waitFor();
+    assert.equal(bulkQueued,1);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
+    await page.screenshot({path:path.join(out,'bulk-broadcast-mobile-SYNTHETIC.png'),fullPage:true});
+    await page.setViewportSize({width:1440,height:1000});
+    await page.screenshot({path:path.join(out,'bulk-broadcast-desktop-SYNTHETIC.png'),fullPage:true});
     assert.deepEqual(errors, []);
     console.log('Advisory/SMS browser regressions passed: empty-list composer, draft save/recovery, review, message preview, retry request, configuration/recipient blockers, provider errors, delivery details, refresh failures, mobile and desktop layouts. No real messages sent.');
   } finally { await browser.close(); }
