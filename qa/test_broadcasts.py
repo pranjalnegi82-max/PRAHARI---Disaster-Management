@@ -27,7 +27,8 @@ def factory(request, tmp_path):
 
 def queue(f, scope='ALL_MONITORED', count=3, ttl=3600):
     return b.enqueue(f, 1, scope, 1 if scope!='ALL_MONITORED' else None, 'Synthetic audience',
-        {x:'TEST ONLY synthetic message' for x in ('en','hi','as')}, int(time.time())+ttl, 'ADMIN', count)
+        {x:{'text':'TEST ONLY synthetic message'} for x in ('en','hi','as')},
+        int(time.time())+ttl, 'ADMIN', count)
 
 
 def rows(f):
@@ -153,6 +154,7 @@ def test_admin_gate_and_preview_does_not_send(factory,monkeypatch):
     from fastapi.testclient import TestClient
     import broadcast_api as api
     import auth
+    monkeypatch.setattr(api,'BROADCAST_PROVIDER','twilio')
     monkeypatch.setattr(auth,'AUTH_REQUIRED',True)
     monkeypatch.setattr(api,'production_account_status',lambda:{'ready':False,'issues':['Trial account'],'account_type':'Trial'})
     app=FastAPI();app.include_router(api.routes(factory,[{'id':1,'name':'Synthetic','state':'Test'}],lambda *a,**k:'TEST ONLY'))

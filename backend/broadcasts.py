@@ -12,17 +12,29 @@ def initialize_broadcast_schema(cur):
         id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER NOT NULL,
         scope TEXT NOT NULL, target_location_id INTEGER, target_label TEXT NOT NULL,
         status TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
-        note TEXT, actor_role TEXT NOT NULL)''')
+        note TEXT, actor_role TEXT NOT NULL, provider TEXT DEFAULT 'twilio')''')
     cur.execute('''CREATE TABLE IF NOT EXISTS broadcast_items(
         id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL,
         alert_id INTEGER NOT NULL, recipient_id INTEGER NOT NULL,
         phone_e164 TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0, available_at DOUBLE PRECISION NOT NULL,
         updated_at INTEGER NOT NULL, provider_message_sid TEXT,
-        error_code TEXT, error_message TEXT,
+        error_code TEXT, error_message TEXT, provider TEXT DEFAULT 'twilio',
+        template_id TEXT, template_variables TEXT,
         UNIQUE(alert_id,phone_e164))''')
     cur.execute('''CREATE TABLE IF NOT EXISTS broadcast_runtime(
-        id INTEGER PRIMARY KEY AUTOINCREMENT, heartbeat INTEGER, next_send DOUBLE PRECISION)''')
+        id INTEGER PRIMARY KEY AUTOINCREMENT, heartbeat INTEGER, next_send DOUBLE PRECISION,
+        provider TEXT)''')
+    from database import column_names
+    for table, fields in {
+        'broadcast_jobs': {'provider': "TEXT DEFAULT 'twilio'"},
+        'broadcast_items': {'provider': "TEXT DEFAULT 'twilio'", 'template_id': 'TEXT', 'template_variables': 'TEXT'},
+        'broadcast_runtime': {'provider': 'TEXT'},
+    }.items():
+        existing = column_names(cur, table)
+        for name, ddl in fields.items():
+            if name not in existing:
+                cur.execute(f'ALTER TABLE {table} ADD COLUMN {name} {ddl}')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_broadcast_ready ON broadcast_items(status,available_at,id)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_broadcast_job ON broadcast_items(job_id,status)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_broadcast_sid ON broadcast_items(provider_message_sid)')
@@ -49,8 +61,10 @@ def audience_where(scope, location_id):
     return clause, params
 
 
-def audience(con, alert_id, scope, location_id):
+def audience(con, alert_id, scope, location_id, provider='twilio'):
     clause, params = audience_where(scope, location_id)
+    if provider == 'msg91':
+        clause += " AND r.phone_e164 LIKE '+91%' AND LENGTH(r.phone_e164)=13 AND SUBSTR(r.phone_e164,4,1) IN ('6','7','8','9')"
     # Legacy attempts are excluded too, even when the same phone has multiple rows.
     return f'''SELECT MIN(r.id) AS id, r.phone_e164 FROM notification_recipients r
         WHERE {clause}
@@ -61,40 +75,60 @@ def audience(con, alert_id, scope, location_id):
         GROUP BY r.phone_e164''', [*params, alert_id, alert_id]
 
 
-def preview(connect, alert_id, scope, location_id):
+def preview(connect, alert_id, scope, location_id, provider='twilio'):
     con = connect()
     try:
-        sql, args = audience(con, alert_id, scope, location_id)
+        sql, args = audience(con, alert_id, scope, location_id, provider)
         return con.execute('SELECT COUNT(*) AS n FROM (' + sql + ') eligible', args).fetchone()['n']
     finally:
         con.close()
 
 
+def audience_languages(connect, alert_id, scope, location_id, provider='twilio'):
+    con = connect()
+    try:
+        sql, args = audience(con, alert_id, scope, location_id, provider)
+        rows = con.execute('''SELECT DISTINCT CASE r.language WHEN 'hi' THEN 'hi'
+            WHEN 'as' THEN 'as' ELSE 'en' END AS language
+            FROM notification_recipients r JOIN (''' + sql + ''') eligible ON r.id=eligible.id''', args).fetchall()
+        return {row['language'] for row in rows}
+    finally:
+        con.close()
+
+
 def enqueue(connect, alert_id, scope, location_id, label, messages, expires_at,
-            actor_role, expected_count):
+            actor_role, expected_count, provider='twilio'):
     now = int(time.time()); con = connect()
     try:
         _lock(con)
         alert = con.execute('SELECT * FROM alerts WHERE id=?' + (' FOR UPDATE' if isinstance(con, PostgresConnection) else ''), (alert_id,)).fetchone()
         if not alert or alert['lifecycle_status'] not in ('REVIEWED', 'ISSUED'):
             raise ValueError('Only reviewed or issued advisories can be broadcast')
-        sql, args = audience(con, alert_id, scope, location_id)
+        sql, args = audience(con, alert_id, scope, location_id, provider)
         count = con.execute('SELECT COUNT(*) AS n FROM (' + sql + ') eligible', args).fetchone()['n']
         if not count:
             raise ValueError('No new opted-in recipients. Previously queued or attempted numbers are excluded.')
         if count != expected_count:
             raise ValueError('The audience changed. Preview again before confirming.')
+        if provider == 'msg91':
+            configured = {lang for lang in messages if messages[lang].get('template_id')}
+            if audience_languages_in_transaction(con, sql, args) - configured:
+                raise ValueError('The audience language changed. Configure approved templates and preview again.')
         jid = insert_row(con.cursor(), '''INSERT INTO broadcast_jobs
-            (alert_id,scope,target_location_id,target_label,status,created_at,expires_at,actor_role)
-            VALUES(?,?,?,?,?,?,?,?)''', (alert_id, scope, location_id, label, 'RUNNING', now, expires_at, actor_role))
+            (alert_id,scope,target_location_id,target_label,status,created_at,expires_at,actor_role,provider)
+            VALUES(?,?,?,?,?,?,?,?,?)''', (alert_id, scope, location_id, label, 'RUNNING', now, expires_at, actor_role, provider))
         # Materialize in one bounded-memory database operation, not 100,000 HTTP requests.
         inserted = con.execute('''INSERT INTO broadcast_items
-            (job_id,alert_id,recipient_id,phone_e164,message,status,available_at,updated_at)
+            (job_id,alert_id,recipient_id,phone_e164,message,status,available_at,updated_at,provider,template_id,template_variables)
             SELECT ?,?,r.id,r.phone_e164,
-            CASE r.language WHEN 'hi' THEN ? WHEN 'as' THEN ? ELSE ? END,'READY',?,?
+            CASE r.language WHEN 'hi' THEN ? WHEN 'as' THEN ? ELSE ? END,'READY',?,?,?,
+            CASE r.language WHEN 'hi' THEN ? WHEN 'as' THEN ? ELSE ? END,
+            CASE r.language WHEN 'hi' THEN ? WHEN 'as' THEN ? ELSE ? END
             FROM notification_recipients r JOIN (''' + sql + ''') eligible ON eligible.id=r.id
             ON CONFLICT(alert_id,phone_e164) DO NOTHING''',
-            [jid, alert_id, messages['hi'], messages['as'], messages['en'], now, now, *args])
+            [jid, alert_id, *(messages[x]['text'] for x in ('hi','as','en')), now, now, provider,
+             *(messages[x].get('template_id') for x in ('hi','as','en')),
+             *(messages[x].get('template_variables') for x in ('hi','as','en')), *args])
         if inserted.rowcount != count:
             raise ValueError('The audience changed. Preview again before confirming.')
         if alert['lifecycle_status'] == 'REVIEWED':
@@ -111,6 +145,13 @@ def enqueue(connect, alert_id, scope, location_id, label, messages, expires_at,
         con.close()
 
 
+def audience_languages_in_transaction(con, sql, args):
+    rows = con.execute('''SELECT DISTINCT CASE r.language WHEN 'hi' THEN 'hi'
+        WHEN 'as' THEN 'as' ELSE 'en' END AS language FROM notification_recipients r
+        JOIN (''' + sql + ''') eligible ON eligible.id=r.id''', args).fetchall()
+    return {r['language'] for r in rows}
+
+
 def overview(connect):
     con = connect()
     try:
@@ -121,9 +162,10 @@ def overview(connect):
             job['counts'] = {r['status']: r['n'] for r in con.execute(
                 'SELECT status,COUNT(*) AS n FROM broadcast_items WHERE job_id=? GROUP BY status', (job['id'],)).fetchall()}
             job['total'] = sum(job['counts'].values()); output.append(job)
-        worker = con.execute('SELECT heartbeat FROM broadcast_runtime WHERE id=1').fetchone()
+        worker = con.execute('SELECT heartbeat,provider FROM broadcast_runtime WHERE id=1').fetchone()
         hb = worker['heartbeat'] if worker else 0
-        return {'jobs': output, 'worker_online': bool(hb and time.time() - hb < 90), 'last_heartbeat': hb}
+        return {'jobs': output, 'worker_online': bool(hb and time.time() - hb < 90),
+                'worker_provider': worker['provider'] if worker else None, 'last_heartbeat': hb}
     finally:
         con.close()
 
@@ -155,13 +197,13 @@ def control(connect, job_id, action):
         con.close()
 
 
-def claim(connect, requests_per_second):
+def claim(connect, requests_per_second, provider='twilio'):
     """Global transactional rate gate works across worker processes."""
     now = time.time(); con = connect()
     try:
         _lock(con)
-        con.execute('''INSERT INTO broadcast_runtime(id,heartbeat,next_send) VALUES(1,?,0)
-            ON CONFLICT(id) DO UPDATE SET heartbeat=excluded.heartbeat''', (int(now),))
+        con.execute('''INSERT INTO broadcast_runtime(id,heartbeat,next_send,provider) VALUES(1,?,0,?)
+            ON CONFLICT(id) DO UPDATE SET heartbeat=excluded.heartbeat,provider=excluded.provider''', (int(now),provider))
         con.execute("UPDATE broadcast_items SET status='UNKNOWN',error_message='Worker interrupted during submission; investigate before any resend.',updated_at=? WHERE status='SENDING' AND updated_at<?", (int(now), int(now)-120))
         con.execute("UPDATE broadcast_items SET status='EXPIRED',updated_at=? WHERE status='READY' AND job_id IN (SELECT id FROM broadcast_jobs WHERE expires_at<=?)", (int(now), int(now)))
         con.execute("UPDATE broadcast_items SET status='CANCELED',updated_at=? WHERE status='READY' AND alert_id IN (SELECT id FROM alerts WHERE lifecycle_status NOT IN ('ISSUED','ACKNOWLEDGED'))", (int(now),))
@@ -171,7 +213,7 @@ def claim(connect, requests_per_second):
             con.commit(); return None
         item = con.execute('''SELECT i.* FROM broadcast_items i JOIN broadcast_jobs j ON j.id=i.job_id
             WHERE i.status='READY' AND i.available_at<=? AND j.status='RUNNING' AND j.expires_at>?
-            ORDER BY i.id LIMIT 1''', (now, int(now))).fetchone()
+            AND j.provider=? AND i.provider=? ORDER BY i.id LIMIT 1''', (now, int(now), provider, provider)).fetchone()
         if not item:
             con.commit(); return None
         item = dict(item)
@@ -194,13 +236,13 @@ def claim(connect, requests_per_second):
         con.close()
 
 
-def process_one(connect, send, requests_per_second=1):
-    item = claim(connect, requests_per_second)
+def process_one(connect, send, requests_per_second=1, provider='twilio'):
+    item = claim(connect, requests_per_second, provider)
     if not item:
         return False
     sid = None; code = None; error = None; available = time.time(); pause = False
     try:
-        result = send('sms', item['phone_e164'], item['message'])
+        result = send(item) if provider == 'msg91' else send('sms', item['phone_e164'], item['message'])
         sid = result.get('sid')
         status = str(result.get('status') or 'ACCEPTED').upper() if sid else 'UNKNOWN'
         code = str(result.get('error_code') or '') or None
@@ -215,7 +257,7 @@ def process_one(connect, send, requests_per_second=1):
             status = 'FAILED'; error = f'Provider rejected the request (HTTP {http}, code {code or "unknown"}).'
         else:
             status = 'UNKNOWN'; error = 'Submission outcome uncertain. Inspect provider logs; no automatic resend.'
-        pause = code in ('21608', '20003', '21408', '21606') or http in (401, 403)
+        pause = code in ('21608', '20003', '21408', '21606', '203', '211', '301') or http in (401, 403)
     con = connect()
     try:
         con.execute('''UPDATE broadcast_items SET status=?,provider_message_sid=?,error_code=?,error_message=?,available_at=?,updated_at=?
@@ -247,5 +289,38 @@ def record_status(connect, sid, status, code=None):
             return
         con.execute('UPDATE broadcast_items SET status=?,error_code=?,updated_at=? WHERE id=?', (status, code, int(time.time()), row['id']))
         con.commit()
+    finally:
+        con.close()
+
+
+def record_msg91_status(connect, receipt):
+    """Only a trusted webhook carrying the per-recipient correlation may update a row."""
+    con = connect()
+    try:
+        _lock(con)
+        if receipt['id']:
+            row = con.execute('''SELECT id,status,provider_message_sid FROM broadcast_items
+                WHERE id=? AND provider='msg91' AND phone_e164=?''',
+                (receipt['id'], receipt['phone'])).fetchone()
+        else:
+            row = con.execute('''SELECT id,status,provider_message_sid FROM broadcast_items
+                WHERE provider_message_sid=? AND provider='msg91' AND phone_e164=?''',
+                (receipt['sid'], receipt['phone'])).fetchone()
+        if not row:
+            return False
+        old_sid = row['provider_message_sid']
+        sid = receipt['sid']
+        if old_sid and sid and old_sid != sid:
+            return False
+        ranks = {'READY': -2, 'SENDING': -1, 'UNKNOWN': -1, 'QUEUED': 0,
+                 'SENT': 1, 'FAILED': 2, 'DELIVERED': 3}
+        if ranks.get(row['status'], 9) > ranks[receipt['status']]:
+            return False
+        con.execute('''UPDATE broadcast_items SET status=?,error_code=?,
+            provider_message_sid=?,updated_at=? WHERE id=?''',
+            (receipt['status'], receipt['error_code'], old_sid or sid,
+             int(time.time()), row['id']))
+        con.commit()
+        return True
     finally:
         con.close()

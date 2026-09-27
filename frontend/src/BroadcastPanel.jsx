@@ -26,7 +26,7 @@ export default function BroadcastPanel({alerts, locations, onRefresh}) {
     <div className="page-title"><div><h2>Bulk broadcasts</h2><p>Send a reviewed advisory to opted-in civilians across one area or all monitored areas.</p></div><span className="badge">{data?.worker_online?'Worker online':'Worker offline'}</span></div>
     {error&&<div className="notice notice-error" role="alert">{error}</div>}
     {notice&&<div className="notice notice-warn" role="status">{notice}</div>}
-    {data&&!data.enabled&&<div className="notice notice-warn"><strong>Production setup needed</strong><p>Bulk sending needs an upgraded SMS account and a running broadcast worker. Trial accounts still require verified recipients. You can preview your audience below.</p></div>}
+    {data&&!data.enabled&&<div className="notice notice-warn"><strong>MSG91 setup needed</strong><p>Bulk SMS requires your approved MSG91 templates, private API key, delivery webhook and a running broadcast worker. You can preview the audience while setup is incomplete.</p></div>}
     <form className="report-form record-card" onSubmit={inspect}>
       <div className="form-row"><label className="field"><span>Reviewed advisory</span><select required disabled={busy} value={form.alert_id} onChange={e=>change('alert_id',e.target.value)}><option value="">Select advisory</option>{eligible.map(a=><option key={a.id} value={a.id}>#{a.id} · {a.location} · {a.level}</option>)}</select></label>
       <label className="field"><span>Broadcast audience</span><select disabled={busy} value={form.area} onChange={e=>change('area',e.target.value)}><option value="ALERT_AREA">Advisory area only</option><option value="ALL">All monitored areas</option>{locations.map(l=><option key={l.id} value={l.id}>{l.name}, {l.state}</option>)}</select></label></div>
@@ -34,10 +34,10 @@ export default function BroadcastPanel({alerts, locations, onRefresh}) {
       {!eligible.length&&<p>Create an advisory in Advisory alerts and mark it reviewed before broadcasting.</p>}
       <button className="btn btn-secondary" disabled={busy||!form.alert_id}>{busy?'Please wait…':'Preview broadcast'}</button>
     </form>
-    {preview&&<div className="record-card"><h3>{preview.recipients.toLocaleString()} eligible numbers</h3><p>{preview.target_label} · Duplicate numbers and previous attempts are excluded.</p>
+    {preview&&<div className="record-card"><h3>{preview.recipients.toLocaleString()} eligible numbers</h3><p>{preview.target_label} · Active, opted-in Indian mobile numbers. Duplicate numbers and previous attempts are excluded.</p>
       {preview.minimum_submission_seconds!=null&&<p>Submission needs at least {Math.ceil(preview.minimum_submission_seconds/60).toLocaleString()} minutes at the configured rate. Provider delays and worker capacity can increase this; it is not a delivery-time guarantee.</p>}
       {[...new Set(Object.values(preview.messages))].map((m,i)=><div className="sms-draft-preview" key={i}><strong>Message {i+1}</strong><p style={{whiteSpace:'pre-wrap'}}>{m}</p></div>)}
-      <p className="fine">The registry language determines the message. Long or multilingual texts may cost multiple SMS segments. No recipient verification step is added by PRAHARI.</p>
+      <p className="fine">MSG91 sends only through an approved template for each registry language. These are the rendered SMS previews; confirm the approved variables and text in MSG91 before activating. Long or multilingual SMS may cost multiple segments.</p>
       {!!preview.issues?.length&&<div className="notice notice-warn"><ul>{preview.issues.map(x=><li key={x}>{x}</li>)}</ul></div>}
       <button className="btn btn-danger" disabled={busy||!preview.ready||!preview.recipients} onClick={queue}>Issue & queue broadcast</button>
     </div>}

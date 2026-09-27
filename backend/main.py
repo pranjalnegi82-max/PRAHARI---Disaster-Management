@@ -30,7 +30,8 @@ from ml.risk_engine import predict as ml_predict, status as ml_status
 from settings import (ALLOWED_ORIGINS, AUTH_REQUIRED, APP_ENV, ADMIN_KEY, WEATHER_TIMEOUT_SECONDS, WEATHER_CACHE_TTL_SECONDS,
                       WEATHER_STALE_MAX_SECONDS, EXTERNAL_SMS_ENABLED,
                       NOTIFICATION_PROVIDER, MAX_UPLOAD_BYTES, DB_PATH, FIELD_OFFICERS,
-                      FIELD_OFFICERS_CONFIG_ERROR, ENV_SOURCE, DATABASE_URL, BROADCAST_ENABLED)
+                      FIELD_OFFICERS_CONFIG_ERROR, ENV_SOURCE, DATABASE_URL,
+                      BROADCAST_ENABLED, BROADCAST_PROVIDER)
 from database import connect as connect_database, insert_row, storage_status
 from database_schema import initialize_schema
 from auth import resolve_role, require_role, field_officer_for_key
@@ -765,6 +766,9 @@ def localized_alert(row, language="en"):
     d['message']=d.get(key) or d.get('message_en'); d['acknowledged']=bool(d.get('acknowledged'))
     delivery=_delivery_summary(d['id']) if d.get('id') else {'sms':{}}
     cfg=notification_config_status()
+    if BROADCAST_ENABLED and BROADCAST_PROVIDER == 'msg91':
+        from msg91_provider import status as msg91_status
+        cfg={'sms':{'ready':msg91_status()['ready']}}
     def channel_state(name, enabled):
         counts=delivery.get(name,{})
         delivered=sum(counts.get(k,0) for k in ('DELIVERED','READ'))
@@ -779,7 +783,7 @@ def localized_alert(row, language="en"):
     d['channels']={
         'command_center':{'status':'LOCAL_RECORD','confirmed_delivery':True},
         'browser':{'status':'LOCAL_UI_ONLY','confirmed_delivery':False},
-        'sms':channel_state('sms',EXTERNAL_SMS_ENABLED),
+        'sms':channel_state('sms',EXTERNAL_SMS_ENABLED or (BROADCAST_ENABLED and BROADCAST_PROVIDER == 'msg91')),
     }
     d['broadcast_queue_enabled']=BROADCAST_ENABLED
     d['public_warning_issued']=bool(d.get('issued_at'))
@@ -1767,17 +1771,46 @@ async def twilio_status_callback(request:Request):
     return Response(status_code=204)
 
 
+@app.post('/api/notification/msg91/status')
+async def msg91_status_callback(request:Request):
+    from msg91_provider import verify_webhook, parse_webhook
+    from broadcasts import record_msg91_status
+    if not verify_webhook(request.headers.get('X-PRAHARI-Webhook-Token')):
+        raise HTTPException(403, 'Invalid MSG91 webhook credentials')
+    body=await request.body()
+    if len(body)>16384:
+        raise HTTPException(413, 'Webhook payload too large')
+    try:
+        receipt=parse_webhook(json.loads(body))
+    except (ValueError, UnicodeDecodeError):
+        receipt=None
+    if receipt:
+        record_msg91_status(db,receipt)
+    return Response(status_code=204)
+
+
 @app.get("/api/notification/channels")
 def notification_channels():
     cfg=notification_config_status(); con=db()
     total=con.execute("SELECT COUNT(*) c FROM notification_recipients WHERE consent_status='ACTIVE'").fetchone()['c']
     sms_count=con.execute("SELECT COUNT(*) c FROM notification_recipients WHERE consent_status='ACTIVE' AND sms_enabled=1").fetchone()['c']
     con.close()
+    sms_status={'status':'READY' if cfg['sms']['ready'] else ('ENABLED_NOT_READY' if EXTERNAL_SMS_ENABLED else 'DISABLED'),
+                'provider':cfg['provider'],'delivery':'Twilio delivery receipts/status are tracked',
+                'opted_in_recipients':sms_count,'issues':cfg['sms'].get('issues',[])}
+    if BROADCAST_ENABLED and BROADCAST_PROVIDER == 'msg91':
+        from msg91_provider import status as msg91_status
+        from broadcasts import overview
+        readiness=msg91_status()
+        online=overview(db)['worker_online']
+        sms_status={'status':'READY' if readiness['ready'] and online else 'ENABLED_NOT_READY',
+                    'provider':'msg91','delivery':'MSG91 delivery webhook',
+                    'opted_in_recipients':sms_count,
+                    'issues':readiness['issues']+([] if online else ['Broadcast worker is offline.'])}
     return {
         'command_center':{'status':'ACTIVE','delivery':'local database record'},
         'browser':{'status':'LOCAL_UI_ONLY','delivery':'requires user browser permission; not an external public warning'},
-        'sms':{'status':'READY' if cfg['sms']['ready'] else ('ENABLED_NOT_READY' if EXTERNAL_SMS_ENABLED else 'DISABLED'),'provider':cfg['provider'],'delivery':'Twilio delivery receipts/status are tracked','opted_in_recipients':sms_count,
-               'issues':cfg['sms'].get('issues',[])},
+        'sms':sms_status,
         'active_recipients':total,'status_callback':cfg.get('status_callback'),
         'policy':'SMS messages are sent only after explicit ADMIN issue-and-notify action, only to ACTIVE opted-in recipients. A click is not treated as delivery confirmation.'
     }
