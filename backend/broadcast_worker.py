@@ -5,8 +5,9 @@ import time
 
 from database import connect
 from database_schema import initialize_schema
-from settings import DATABASE_URL, DB_PATH, BROADCAST_ENABLED, BROADCAST_REQUESTS_PER_SECOND
+from settings import DATABASE_URL, DB_PATH, BROADCAST_ENABLED, BROADCAST_REQUESTS_PER_SECOND, BROADCAST_PROVIDER
 from notifications import send, fetch_status, production_account_status
+from msg91_provider import send as msg91_send, status as msg91_status
 from broadcasts import process_one, record_status
 
 log = logging.getLogger('prahari.broadcast')
@@ -44,13 +45,15 @@ def main():
     while not stop:
         try:
             if time.time() >= next_check:
-                account = production_account_status(); ready = account['ready']
+                account = msg91_status() if BROADCAST_PROVIDER == 'msg91' else production_account_status()
+                ready = account['ready']
                 next_check = time.time() + (300 if ready else 30)
                 if not ready:
                     log.warning('Broadcast paused: %s', ' '.join(account['issues']))
             if ready:
-                process_one(connection, send, BROADCAST_REQUESTS_PER_SECOND)
-                if time.time() >= next_receipt:
+                process_one(connection, msg91_send if BROADCAST_PROVIDER == 'msg91' else send,
+                            BROADCAST_REQUESTS_PER_SECOND, BROADCAST_PROVIDER)
+                if BROADCAST_PROVIDER == 'twilio' and time.time() >= next_receipt:
                     reconcile_one(); next_receipt = time.time() + 1
         except Exception:
             # Do not log database URLs, phone numbers or provider request bodies.

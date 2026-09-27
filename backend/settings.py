@@ -96,3 +96,8 @@ DATABASE_URL = os.getenv("PRAHARI_DATABASE_URL", os.getenv("DATABASE_URL", "")).
 # Enable on both API and a separate always-on worker after production SMS setup.
 BROADCAST_ENABLED = env_bool("PRAHARI_BROADCAST_ENABLED", False)
 BROADCAST_REQUESTS_PER_SECOND = max(0.1, min(100.0, float(os.getenv("PRAHARI_BROADCAST_REQUESTS_PER_SECOND", "1"))))
+BROADCAST_PROVIDER = os.getenv("PRAHARI_BROADCAST_PROVIDER", "msg91").strip().lower()
+MSG91_AUTHKEY = os.getenv("PRAHARI_MSG91_AUTHKEY", "").strip()
+MSG91_TEMPLATES_JSON = os.getenv("PRAHARI_MSG91_TEMPLATES_JSON", "").strip()
+MSG91_TEMPLATES_APPROVED = env_bool("PRAHARI_MSG91_TEMPLATES_APPROVED", False)
+MSG91_WEBHOOK_TOKEN = os.getenv("PRAHARI_MSG91_WEBHOOK_TOKEN", "").strip()

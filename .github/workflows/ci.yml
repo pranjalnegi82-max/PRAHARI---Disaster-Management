@@ -90,4 +90,4 @@ jobs:
       - name: PostgreSQL restart, login and migration regressions
         env:
           PRAHARI_TEST_POSTGRES_URL: postgresql://prahari_test:local-ci-only@127.0.0.1:5432/prahari_test
-        run: python -m pytest qa/test_database.py qa/test_broadcasts.py -q
+        run: python -m pytest qa/test_database.py qa/test_broadcasts.py qa/test_msg91.py -q

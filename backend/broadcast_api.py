@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field
 from auth import resolve_role, require_role
 import broadcasts
 from notifications import production_account_status
-from settings import BROADCAST_ENABLED, DATABASE_URL, BROADCAST_REQUESTS_PER_SECOND
+from msg91_provider import status as msg91_status, message_plan
+from settings import BROADCAST_ENABLED, DATABASE_URL, BROADCAST_REQUESTS_PER_SECOND, BROADCAST_PROVIDER
 
 
 class BroadcastRequest(BaseModel):
@@ -51,29 +52,46 @@ def routes(connect, locations, make_text):
             issues.append('Bulk sending is not enabled. Configure the production SMS account and separate broadcast worker first.')
         if not DATABASE_URL:
             issues.append('Bulk sending requires PostgreSQL storage.')
-        if not broadcasts.overview(connect)['worker_online']:
+        worker = broadcasts.overview(connect)
+        if not worker['worker_online'] or worker['worker_provider'] != BROADCAST_PROVIDER:
             issues.append('The broadcast worker is offline or not ready.')
-        provider = production_account_status()
+        provider = msg91_status() if BROADCAST_PROVIDER == 'msg91' else production_account_status()
+        if BROADCAST_PROVIDER not in ('msg91', 'twilio'):
+            issues.append('Choose a supported broadcast provider.')
         return issues + provider['issues'], provider
+
+    def plans(alert):
+        out = {}
+        for language in ('en', 'hi', 'as'):
+            plain = make_text(alert, language, sms=True)
+            if BROADCAST_PROVIDER == 'msg91':
+                try:
+                    out[language] = message_plan(alert, language, plain)
+                except ValueError:
+                    out[language] = {'text': 'No approved MSG91 template is configured for this language.'}
+            else:
+                out[language] = {'text': plain}
+        return out
 
     @router.get('')
     def listing(role: str = Depends(resolve_role)):
         admin(role)
         return {**broadcasts.overview(connect), 'enabled': BROADCAST_ENABLED,
+                'provider': BROADCAST_PROVIDER,
                 'note': 'Queued means waiting to submit; only provider receipts confirm delivery.'}
 
     @router.post('/preview')
     def preview(body: BroadcastRequest, role: str = Depends(resolve_role)):
         admin(role); alert, target, label = context(body)
         issues, provider = ready()
-        recipients = broadcasts.preview(connect, body.alert_id, body.scope, target)
+        recipients = broadcasts.preview(connect, body.alert_id, body.scope, target, BROADCAST_PROVIDER)
         seconds = recipients / BROADCAST_REQUESTS_PER_SECOND
         if seconds > body.expires_in_minutes * 60:
             issues.append('The audience exceeds the configured submission capacity before expiry. Increase the expiry or provision sufficient worker/provider throughput.')
         return {'recipients': recipients, 'minimum_submission_seconds': seconds,
-                'target_label': label, 'messages': {lang: make_text(alert, lang, sms=True) for lang in ('en','hi','as')},
+                'target_label': label, 'messages': {lang: plan['text'] for lang,plan in plans(alert).items()},
                 'issues': issues, 'ready': not issues, 'provider': provider,
-                'note': 'Unique opted-in numbers; previous attempts excluded. Final billing depends on SMS segments and provider rates.'}
+                'note': 'Unique opted-in Indian numbers with no prior attempt for this advisory. Final billing depends on provider SMS segments.'}
 
     @router.post('', status_code=202)
     def create(body: BroadcastRequest, role: str = Depends(resolve_role)):
@@ -85,8 +103,8 @@ def routes(connect, locations, make_text):
             raise HTTPException(409, 'The audience cannot fit within the selected expiry at the configured submission rate. Preview again after changing capacity or expiry.')
         try:
             return broadcasts.enqueue(connect, body.alert_id, body.scope, target, label,
-                {lang: make_text(alert, lang, sms=True) for lang in ('en','hi','as')},
-                int(time.time()) + body.expires_in_minutes * 60, role, body.expected_recipients)
+                plans(alert), int(time.time()) + body.expires_in_minutes * 60,
+                role, body.expected_recipients, BROADCAST_PROVIDER)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
 
