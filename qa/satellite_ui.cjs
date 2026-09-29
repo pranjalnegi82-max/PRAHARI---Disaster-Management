@@ -61,9 +61,9 @@ async function run() {
     });
     await page.goto(base);
     await page.getByRole('button', { name: 'Risk Map', exact: true }).click();
-    await page.getByRole('button', { name: 'Sentinel-2 intelligence', exact: true }).click();
-    await page.getByText('AI analysis unavailable', { exact: true }).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Run segmentation', exact: true }).isDisabled(), true);
+    await page.getByRole('button', { name: 'Sentinel-2 imagery', exact: true }).click();
+    await page.getByRole('heading', { name: 'Sentinel-2 acquisitions', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Run analysis', exact: true }).count(), 0);
     async function noOverflow(width) {
       await page.setViewportSize({ width, height: 844 });
       const overflow = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth,
@@ -78,13 +78,13 @@ async function run() {
     await noOverflow(320); await noOverflow(390);
     await page.screenshot({ path: path.join(out, 'mobile-unavailable.png'), fullPage: true });
     ready = true;
-    await page.getByRole('button', { name: 'Refresh status & scenes', exact: true }).click();
-    await page.getByText('Experimental analysis available', { exact: true }).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Run segmentation', exact: true }).isDisabled(), true);
-    await page.getByRole('checkbox', { name: /I understand/ }).check();
-    await page.getByRole('button', { name: 'Prepare patch', exact: true }).click();
-    await page.getByRole('heading', { name: 'Patch prepared', exact: true }).waitFor();
-    await page.getByRole('button', { name: 'Run segmentation', exact: true }).click();
+    await page.getByRole('button', { name: 'Refresh imagery', exact: true }).click();
+    await page.getByText('Post-event analysis available', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Run analysis', exact: true }).isDisabled(), true);
+    await page.getByRole('checkbox', { name: /Enable reviewed research/ }).check();
+    await page.getByRole('button', { name: 'Prepare analysis', exact: true }).click();
+    await page.getByRole('heading', { name: 'Analysis input ready', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Run analysis', exact: true }).click();
     await page.getByRole('heading', { name: '1 candidate polygon', exact: true }).waitFor();
     assert.equal(requests.at(-1).patch_id, patch.patch_id);
     assert.equal(requests.at(-1).confirm_experimental, true);
@@ -106,20 +106,20 @@ async function run() {
     await noOverflow(1280);
     await page.screenshot({ path: path.join(out, 'desktop-result-SYNTHETIC.png'), fullPage: true });
     mode = 'empty';
-    await page.getByRole('button', { name: 'Run segmentation', exact: true }).click();
+    await page.getByRole('button', { name: 'Run analysis', exact: true }).click();
     await page.getByRole('heading', { name: 'No candidate polygons', exact: true }).waitFor();
     await page.getByText('No components met the polygon size threshold. This is not proof that the area is safe.', { exact: true }).waitFor();
     mode = 'hold';
-    await page.getByRole('button', { name: 'Run segmentation', exact: true }).click();
+    await page.getByRole('button', { name: 'Run analysis', exact: true }).click();
     await page.getByText('Reading Sentinel-2 band B2', { exact: true }).waitFor();
     await page.getByRole('searchbox').fill('Aizawl');
     await page.locator('.location-results').getByRole('button', { name: 'Aizawl Mizoram' }).click();
-    await page.getByRole('heading', { name: 'Aizawl · post-event review', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Aizawl · satellite review', exact: true }).waitFor();
     assert.equal(await page.getByRole('region', { name: 'Segmentation result' }).count(), 0);
-    assert.equal(await page.getByRole('checkbox', { name: /I understand/ }).isChecked(), false);
+    assert.equal(await page.getByRole('checkbox', { name: /Enable reviewed research/ }).isChecked(), false);
     assert.equal(await page.getByText('Reading Sentinel-2 band B2', { exact: true }).count(), 0);
     assert.deepEqual(errors, []);
-    console.log('Satellite browser checks passed: readiness, consent, patch reuse, layers, export, empty results, location switching, 320/390/1280px layouts. Synthetic fixtures only.');
+    console.log('Satellite browser checks passed: imagery-first UI, ready analysis path, layers, export, location switching and responsive layouts. Synthetic fixtures only.');
   } finally { await browser.close(); }
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });
