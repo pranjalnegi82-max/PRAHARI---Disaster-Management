@@ -153,7 +153,7 @@ def test_alert_lifecycle_and_authorization_boundary(monkeypatch, client):
 
 def test_invalid_upload_signature_is_rejected(client):
     data = {
-        "reporter":"Field observer", "phone":"", "location":"Gangtok, Sikkim",
+        "reporter":"Field observer", "phone":"", "location":"Shimla, Himachal Pradesh",
         "lat":"27.3314", "lon":"88.6138", "hazard_type":"Surface crack",
         "location_method":"manual", "severity":"HIGH",
         "description":"A widening crack is visible across the slope shoulder."
@@ -166,7 +166,7 @@ def test_invalid_upload_signature_is_rejected(client):
 
 def test_report_persists_and_requires_operator_for_status(monkeypatch, client):
     data = {
-        "reporter":"Field observer", "phone":"", "location":"Gangtok, Sikkim",
+        "reporter":"Field observer", "phone":"", "location":"Shimla, Himachal Pradesh",
         "lat":"27.3314", "lon":"88.6138", "hazard_type":"Slope movement",
         "location_method":"manual", "severity":"MODERATE",
         "description":"Slow visible movement and fresh small cracks after rain."
@@ -299,7 +299,7 @@ def test_manual_advisory_can_be_drafted_without_assessment_or_sms(monkeypatch, c
     assert alert['source'] == 'admin-manual'
     assert alert['risk_percent'] is None
     assert alert['public_warning_issued'] is False
-    assert alert['location'] == 'Gangtok, Sikkim'
+    assert alert['location'] == 'Shimla, Himachal Pradesh'
     assert alert['message'] == 'TEST ONLY: This is a synthetic draft for workflow testing.'
     assert client.get('/api/alerts').json()[0]['id'] == alert['id']
     history=client.get(f"/api/alerts/{alert['id']}/history").json()['history']
@@ -352,7 +352,7 @@ def test_manual_advisory_review_and_sms_preserve_complete_written_message(monkey
     reviewed=client.patch(f'/api/alerts/{aid}/transition',json={'to_status':'REVIEWED'})
     assert reviewed.status_code == 200
     preview=client.get(f'/api/alerts/{aid}/notification-preview').json()
-    assert preview['message'] == f'PRAHARI | Gangtok, Sikkim\n{message}'
+    assert preview['message'] == f'PRAHARI | Shimla, Himachal Pradesh\n{message}'
     assert len(preview['message']) > 300
     result=client.post(f'/api/alerts/{aid}/issue-and-notify',json={})
     assert result.status_code == 200
@@ -525,7 +525,7 @@ def test_admin_can_broadcast_to_specific_or_all_monitored_areas(monkeypatch, cli
     preview=client.get(f'/api/alerts/{aid}/notification-preview?scope=SPECIFIC_AREA&target_location_id=2')
     assert preview.status_code == 200
     assert preview.json()['sms_recipients'] == 1
-    assert 'Aizawl' in preview.json()['target_label']
+    assert 'Mandi' in preview.json()['target_label']
 
     out=client.post(f'/api/alerts/{aid}/issue-and-notify',json={'scope':'ALL_MONITORED'})
     assert out.status_code == 200
@@ -571,7 +571,7 @@ def test_separate_field_officer_portal_login_is_posting_scoped(client, monkeypat
     assert body['portal'] == 'FIELD_OFFICER'
     assert body['current_role'] == 'FIELD_OFFICER'
     assert body['actor']['posting_location_id'] == 1
-    assert 'Gangtok' in body['actor']['posting']
+    assert 'Shimla' in body['actor']['posting']
 
     # A field-officer key cannot become an admin just by selecting the admin portal.
     denied_admin = client.post('/api/auth/login', json={'portal':'ADMIN','access_key':'field-portal-test'})
