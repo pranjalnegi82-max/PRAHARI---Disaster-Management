@@ -15,7 +15,7 @@ const RISK = {
 };
 const NAV = ['Flash Floods', 'Overview', 'Risk Map', 'Reports & Alerts', 'Data & Settings'];
 const NAV_ICONS = { 'Flash Floods':'water', 'Overview':'home', 'Risk Map':'map', 'Reports & Alerts':'report', 'Data & Settings':'settings' };
-const STATE_LABEL = { CURRENT: 'Current', STALE: 'Cached / stale', MISSING: 'Missing', HISTORICAL_REPLAY: 'Historical replay', BASELINE_DEMO: 'Prototype baseline' };
+const STATE_LABEL = { CURRENT: 'Current', STALE: 'Cached / stale', MISSING: 'Missing', NOT_FETCHED: 'Not fetched' };
 const RISK_COLOR = { LOW:'#2f855a', MODERATE:'#b7791f', HIGH:'#c05621', CRITICAL:'#c53030', UNKNOWN:'#718096' };
 
 const fmt = (v, digits=1) => v === null || v === undefined || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(digits);
@@ -26,34 +26,6 @@ const fmtTime = (v) => {
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
 };
 
-async function browserDirectLiveFallback(locations) {
-  if (!Array.isArray(locations) || !locations.length) return locations || [];
-  const params = new URLSearchParams({
-    latitude: locations.map(x=>x.lat).join(','),
-    longitude: locations.map(x=>x.lon).join(','),
-    timezone: 'auto',
-    current: 'temperature_2m,relative_humidity_2m,precipitation,rain,cloud_cover,wind_speed_10m,wind_gusts_10m',
-    hourly: 'precipitation,rain,precipitation_probability,temperature_2m,relative_humidity_2m,soil_moisture_0_to_1cm',
-    past_hours: '264',
-    forecast_hours: '72',
-  });
-  const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
-  if (!response.ok) throw new Error(`Direct Open-Meteo fallback failed: ${response.status} ${response.statusText}`);
-  const raw = await response.json();
-  const payloads = Array.isArray(raw) ? raw : [raw];
-  if (payloads.length !== locations.length) throw new Error('Direct Open-Meteo fallback returned an unexpected location count.');
-  const assessed = await Promise.all(locations.map(async (loc,i)=>{
-    const parsed = await post(`/api/live/browser-relay/${loc.id}`, {provider:'OPEN_METEO', payload:payloads[i]});
-    return {...parsed, __browser_provider_payload:payloads[i]};
-  }));
-  return assessed;
-}
-
-function needsBrowserWeatherFallback(data) {
-  return Array.isArray(data) && data.length > 0 &&
-    data.every(x=>x.data_state==='MISSING') &&
-    data.some(x=>String(x.weather_error||'').includes('429'));
-}
 
 function Badge({children, tone='neutral'}) { return <span className={`badge badge-${tone}`}>{children}</span>; }
 function StateBadge({state}) {
@@ -115,7 +87,7 @@ function RiskMapView({locations, selected, onSelect, basemap='street', compact=f
     ? {url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr:'Tiles © Esri — visual basemap only'}
     : {url:'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attr:'© OpenStreetMap contributors'};
   return <div className={`map-wrap ${compact ? 'map-compact' : ''}`}>
-    <MapContainer center={[25.6, 92.7]} zoom={5} scrollWheelZoom={!compact} className="map-canvas">
+    <MapContainer center={[22.8, 79.0]} zoom={4} scrollWheelZoom={!compact} className="map-canvas">
       <TileLayer url={tiles.url} attribution={tiles.attr}/>
       <MapFocus location={selected}/>
       {locations.map(loc => <CircleMarker key={loc.id} center={[loc.lat, loc.lon]} radius={loc.id===selected?.id ? 12 : 9}
@@ -152,7 +124,7 @@ function PortalLogin({onAuthenticated,initialPortal='ADMIN'}) {
     <header className="login-brand"><span className="brand-symbol">P</span><div><strong>PRAHARI</strong><small>Predictive Risk Assessment, Hazard Alert & Response Intelligence</small></div></header>
     <main className="login-card-wrap">
       <section className="login-intro">
-        <span className="hero-kicker">SIH26192 · Hilly regions of India</span>
+        <span className="hero-kicker">Hilly regions of India</span>
         <h1>One platform.<br/>Two operational portals.</h1>
         <p>Role-separated access keeps command decisions and field enrollment clear, traceable and appropriately restricted.</p>
         <div className="login-safety"><Icon name="shield" size={18}/><span>PRAHARI is advisory decision support. Official warnings remain with authorized agencies.</span></div>
@@ -166,13 +138,13 @@ function PortalLogin({onAuthenticated,initialPortal='ADMIN'}) {
           <div className="portal-login-heading"><h2>{portal==='ADMIN'?'Admin sign in':'Field officer sign in'}</h2><p>{portal==='ADMIN'?'Access the PRAHARI command and alert-management workspace.':'Your assigned posting is enforced by the backend after sign in.'}</p></div>
           {portal==='FIELD_OFFICER'&&<label className="field"><span>Officer code</span><input value={officerCode} onChange={e=>setOfficerCode(e.target.value)} placeholder="e.g. FO-GTK-01" autoComplete="username" required/></label>}
           <label className="field"><span>{portal==='ADMIN'?'Admin access key':'Officer access key'}</span><input type="password" value={accessKey} onChange={e=>setAccessKey(e.target.value)} placeholder={portal==='ADMIN'?'Enter admin key':'Enter field-officer key'} autoComplete="current-password"/></label>
-          {portal==='ADMIN'&&<p className="fine login-hint">For local development only, if no admin key is configured and authentication is open, this field may be left blank.</p>}
+          
           {error&&<div className="notice notice-error"><strong>Sign in failed.</strong><span>{error}</span></div>}
           <button className="btn btn-primary portal-submit" disabled={busy}>{busy?'Signing in…':portal==='ADMIN'?'Open Admin Portal':'Open Field Officer Portal'}</button>
         </form>
       </section>
     </main>
-    <footer className="login-footer">PRAHARI · Role-separated operational access · SIH26192<span className="login-photo-credit">Yumthang Valley, Sikkim · Photo by <a href="https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0" target="_blank" rel="noreferrer">nur alam / Unsplash</a></span></footer>
+    <footer className="login-footer">PRAHARI · Operational access</footer>
   </div>;
 }
 
@@ -192,16 +164,11 @@ function FieldOfficerPortal({session,onLogout}) {
     setError(''); setRefreshing(true);
     try{
       const [a,p,l,r,al,h]=await Promise.all([
-        get('/api/auth/status'), get('/api/field/profile'), get('/api/live/locations?mode=live'),
+        get('/api/auth/status'), get('/api/field/profile'), get('/api/live/locations'),
         get('/api/reports'), get('/api/alerts'), get('/api/field/households')
       ]);
       if(a.current_role!=='FIELD_OFFICER') throw new Error('This session is not authorized for the Field Officer Portal.');
-      let liveLocations=l;
-      if (needsBrowserWeatherFallback(liveLocations)) {
-        try { liveLocations=await browserDirectLiveFallback(liveLocations); }
-        catch (fallbackError) { console.warn('PRAHARI browser weather fallback unavailable:', fallbackError); }
-      }
-      setAuth(a); setProfile({...p,posting_location_id:p.location_id}); setLocations(liveLocations); setReports(r); setAlerts(al); setHouseholds(h);
+      setAuth(a); setProfile({...p,posting_location_id:p.location_id}); setLocations(l); setReports(r); setAlerts(al); setHouseholds(h);
     }catch(e){setError(e.message);}finally{setLoading(false);setRefreshing(false);}
   }
   useEffect(()=>{loadAll();},[]);
@@ -222,7 +189,7 @@ function FieldOfficerPortal({session,onLogout}) {
       <div className="sidebar-spacer"/>
       <div className="field-officer-card"><span className="user-avatar">F</span><div><strong>{profile?.name||'Field Officer'}</strong><small>{profile?.officer_code||'Posting restricted'}</small></div></div>
       <button className="btn field-logout" onClick={onLogout}><Icon name="logout" size={16}/> Sign out</button>
-      <p className="sidebar-note">Field portal · Posting-scoped civilian registration</p>
+      
     </aside>
     <div className="app-frame">
       <header className="topbar field-topbar">
@@ -378,7 +345,7 @@ function AdminPortal({session,onLogout}) {
         {error && <ErrorBox message={error} onRetry={()=>loadLocations(true)}/>} 
         {loading ? <Loading/> : <>
           {view==='Flash Floods' && <FlashFloodPanel key={selectedId} selected={selected} onRefreshAlerts={loadSideData}/>}
-          {view==='Overview' && <Overview location={activeAssessment} locations={locations} alerts={unresolved} reports={reports} assessmentId={assessmentId} onAssess={runAssessment} onNavigate={setView} refreshing={refreshing} mode="live"/>} 
+          {view==='Overview' && <Overview location={activeAssessment} locations={locations} alerts={unresolved} reports={reports} assessmentId={assessmentId} onAssess={runAssessment} onNavigate={setView} refreshing={refreshing}/>} 
           {view==='Risk Map' && <RiskMapPage locations={locations} selected={selected} onSelect={loc=>setSelectedId(loc.id)} onAssess={runAssessment} assessment={activeAssessment}/>} 
           {view==='Reports & Alerts' && <ReportsAlerts reports={reports} alerts={alerts} selected={selected} locations={locations} auth={auth} onRefresh={loadSideData}/>} 
           {view==='Data & Settings' && <DataSettings system={system} sources={sources} auth={auth} selected={selected} locations={locations} session={session} onLogout={onLogout} onAuthRefresh={loadSideData}/>} 
@@ -437,14 +404,14 @@ function LocationSelector({locations, selectedId, onSelect, onAdded, compact=fal
   </div>;
 }
 
-function Overview({location, locations, alerts, reports, assessmentId, onAssess, onNavigate, refreshing, mode}) {
+function Overview({location, locations, alerts, reports, assessmentId, onAssess, onNavigate, refreshing}) {
   if (!location) return <Empty title="No area available"/>;
   const factors = location.factors || [];
   const stale = location.data_state === 'STALE';
   const missing = location.assessment_status === 'INSUFFICIENT_DATA' || location.data_state === 'MISSING';
   const newReports = reports.filter(r=>r.status==='NEW').length;
   const riskLevel = location.risk_level || 'UNKNOWN';
-  const dataDetail = mode==='replay' ? 'Historical replay' : (location.data_state==='CURRENT' ? 'Live / latest' : STATE_LABEL[location.data_state] || 'Unknown');
+  const dataDetail = location.data_state==='CURRENT' ? 'Live / latest' : STATE_LABEL[location.data_state] || 'Unknown';
 
   return <div className="overview-page">
     <section className="overview-hero" aria-labelledby="overview-title">
@@ -454,12 +421,12 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
         <h1 id="overview-title">Stay Ahead.<br/>Stay Safer.</h1>
         <p>Multi-source flash flood screening, supporting landslide assessment, field reporting and reviewed advisories.</p>
         <div className="hero-actions">
-          <button className="btn btn-hero" onClick={()=>onNavigate('Risk Map')}><Icon name="map" size={18}/> View landslide map</button>
+          <button className="btn btn-hero" onClick={()=>onNavigate('Risk Map')}><Icon name="map" size={18}/> Open risk map</button>
           <button className="btn btn-hero-secondary" onClick={()=>onNavigate('Reports & Alerts')}><Icon name="report" size={18}/> Report incident</button>
         </div>
       </div>
       <div className="hero-risk-card">
-        <div className="hero-risk-top"><span>Landslide screening</span><StateBadge state={location.data_state}/></div>
+        <div className="hero-risk-top"><span>Hill-hazard screening</span><StateBadge state={location.data_state}/></div>
         <RiskBadge level={riskLevel}/>
         <h2>{location.name}, {location.state}</h2>
         <div className="hero-risk-index"><strong>{location.risk_percent == null ? '—' : fmt(location.risk_percent,0)}</strong><span>/100<br/><small>screening index</small></span></div>
@@ -468,8 +435,6 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
       </div>
     </section>
 
-    <p className="terrain-credit">Yumthang Valley, Sikkim · Photo by <a href="https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0" target="_blank" rel="noreferrer">nur alam / Unsplash</a></p>
-
     <section className="summary-strip" aria-label="Current observation summary">
       <StatCard icon="alert" label="Current risk" value={RISK[riskLevel]?.label || 'Unknown'} unit="" detail={location.risk_percent == null ? 'Insufficient data' : `${fmt(location.risk_percent,0)}/100 screening index`} tone={riskLevel==='LOW'?'green':riskLevel==='MODERATE'?'amber':riskLevel==='UNKNOWN'?'blue':'red'}/>
       <StatCard icon="rain" label="Rainfall · 24 h" value={fmt(location.rainfall)} unit=" mm" detail={`72 h: ${fmt(location.antecedent_rainfall_72h)} mm`} tone="blue"/>
@@ -477,12 +442,11 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
       <StatCard icon="data" label="Data status" value={dataDetail} unit="" detail={`${fmt(location.data_completeness_pct,0)}% complete`} tone={location.data_state==='CURRENT'?'green':'amber'}/>
     </section>
 
-    {location.weather_transport==='BROWSER_DIRECT_RELAY' && <div className="notice notice-warn"><strong>Direct live-data transport active.</strong><span>Open-Meteo was fetched by this browser because the cloud backend was rate-limited. Values are live provider data, but the server did not independently re-fetch them.</span></div>}
     {stale && <div className="notice notice-warn"><strong>Cached observations in use.</strong><span>Review source timestamps before operational decisions.</span></div>}
     {missing && <div className="notice notice-error"><strong>Assessment incomplete.</strong><span>Missing data is not converted into low risk. Missing: {(location.missing_inputs||[]).join(', ') || 'required weather fields'}.</span></div>}
 
     <section className="quick-section">
-      <div className="section-heading"><div><span className="eyebrow">Quick access</span><h2>What do you need to do?</h2></div><span className="section-meta">{alerts.length} open alerts · {newReports} new reports</span></div>
+      <div className="section-heading"><div><span className="eyebrow">Quick access</span><h2>Operations</h2></div><span className="section-meta">{alerts.length} open alerts · {newReports} new reports</span></div>
       <div className="quick-grid">
         <QuickAction icon="map" title="Risk Map" detail="Explore areas and risk context" onClick={()=>onNavigate('Risk Map')} tone="blue"/>
         <QuickAction icon="report" title="Citizen Reports" detail="Submit or review field evidence" onClick={()=>onNavigate('Reports & Alerts')} tone="purple"/>
@@ -512,10 +476,8 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
       </Panel>
     </div>
 
-    <details className="disclosure overview-disclosure"><summary>Technical details & limitations</summary><div className="disclosure-body">
-      <p><strong>Terrain context:</strong> bundled prototype point attributes until authoritative DEM-derived features are integrated.</p>
+    <details className="disclosure overview-disclosure"><summary>Data limits</summary><div className="disclosure-body">
       {(location.assessment_limitations||[]).map((x,i)=><p key={i}>{x}</p>)}
-      {location.experimental_model && <p><strong>Experimental ensemble:</strong> visible for research comparison only; synthetic/bootstrap training and not field-calibrated.</p>}
     </div></details>
   </div>;
 }
@@ -760,7 +722,7 @@ function AlertsPane({alerts,auth,locations,onRefresh}) {
   async function loadDeliveries(a){const rows=await get(`/api/alerts/${a.id}/deliveries`);setDeliveryByAlert(m=>({...m,[a.id]:rows}));}
   async function showDeliveries(a){setError('');setNotice('');setBusy(`${a.id}-details`);try{await loadDeliveries(a);}catch(e){setError(e.message);}finally{setBusy(null);}}
   async function refreshDelivery(a){setError('');setNotice('');setBusy(`${a.id}-refresh`);try{const out=await post(`/api/alerts/${a.id}/deliveries/refresh`,{});const errors=(out.deliveries||[]).filter(r=>r?.refresh_error).map(r=>r.refresh_error);if(errors.length)setError(`Could not refresh some delivery statuses: ${[...new Set(errors)].join(' ')}`);else setNotice('Delivery statuses refreshed.');await loadDeliveries(a);await onRefresh();}catch(e){setError(e.message);}finally{setBusy(null);}}
-  function nextActions(a){const s=a.lifecycle_status||'DRAFT'; if(s==='DRAFT')return['REVIEWED','RESOLVED'];if(s==='REVIEWED')return isAdmin?['RESOLVED']:['ISSUED','RESOLVED'];if(s==='ISSUED')return['ACKNOWLEDGED','RESOLVED'];if(s==='ACKNOWLEDGED')return['RESOLVED'];return[];}
+  function nextActions(a){const s=a.lifecycle_status||'DRAFT'; if(s==='DRAFT')return['REVIEWED','RESOLVED'];if(s==='REVIEWED')return['ISSUED','RESOLVED'];if(s==='ISSUED')return['ACKNOWLEDGED','RESOLVED'];if(s==='ACKNOWLEDGED')return['RESOLVED'];return[];}
   return <Panel title="Advisory lifecycle" subtitle="DRAFT → REVIEWED → ISSUED → ACKNOWLEDGED → RESOLVED. External SMS delivery requires an explicit admin action.">
     {error&&<div className="notice notice-error" role="alert">{error}</div>}
     {notice&&<div className="notice notice-warn" role="status">{notice}</div>}
