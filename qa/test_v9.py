@@ -473,10 +473,10 @@ def test_field_officer_enrollment_is_locked_to_posting(client):
     import auth
     auth.AUTH_REQUIRED = True
     auth.FIELD_OFFICERS = [{
-        'name':'Gangtok Field Officer','officer_code':'FO-GTK-01','location_id':1,'key':'field-gangtok-test'
+        'name':'Shimla Field Officer','officer_code':'FO-GTK-01','location_id':1,'key':'field-shimla-test'
     }]
     try:
-        headers={'X-PRAHARI-Key':'field-gangtok-test'}
+        headers={'X-PRAHARI-Key':'field-shimla-test'}
         status=client.get('/api/auth/status',headers=headers)
         assert status.status_code == 200
         assert status.json()['current_role'] == 'FIELD_OFFICER'
@@ -507,7 +507,7 @@ def test_field_officer_enrollment_is_locked_to_posting(client):
 def test_admin_can_broadcast_to_specific_or_all_monitored_areas(monkeypatch, client):
     aid = _make_reviewed_alert(client)
     for name,phone,location_id in [
-        ('Gangtok resident','+919833333331',1),('Aizawl resident','+919833333332',2)
+        ('Shimla resident','+919833333331',1),('Mandi resident','+919833333332',2)
     ]:
         r=client.post('/api/notification/recipients',json={
             'name':name,'phone_e164':phone,'location_id':location_id,'language':'en',
@@ -555,7 +555,7 @@ def test_separate_admin_portal_login(client, monkeypatch):
 
 def test_separate_field_officer_portal_login_is_posting_scoped(client, monkeypatch):
     import auth
-    officers=[{'name':'Gangtok Field Officer','officer_code':'FO-GTK-01','location_id':1,'key':'field-portal-test'}]
+    officers=[{'name':'Shimla Field Officer','officer_code':'FO-GTK-01','location_id':1,'key':'field-portal-test'}]
     monkeypatch.setattr(auth, 'FIELD_OFFICERS', officers)
 
     mismatch = client.post('/api/auth/login', json={
