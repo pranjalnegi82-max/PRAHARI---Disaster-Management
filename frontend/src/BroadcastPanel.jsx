@@ -23,10 +23,10 @@ export default function BroadcastPanel({alerts, locations, onRefresh}) {
   }
   async function show(job,after=0){setBusy(true);setError('');try{const out=await get(`/api/broadcasts/${job.id}/items?after=${after}`);setDetails(d=>({...d,[job.id]:out}));}catch(e){setError(e.message);}finally{setBusy(false);}}
   return <section className="broadcast-panel" aria-label="Bulk broadcasts">
-    <div className="page-title"><div><h2>Bulk broadcasts</h2><p>Send a reviewed advisory to opted-in civilians across one area or all monitored areas.</p></div><span className="badge">{data?.worker_online?'Worker online':'Worker offline'}</span></div>
+    <div className="page-title"><div><h2>Bulk broadcasts</h2><p>Reviewed advisories to opted-in recipients</p></div><span className="badge">{data?.worker_online?'Worker online':'Worker offline'}</span></div>
     {error&&<div className="notice notice-error" role="alert">{error}</div>}
     {notice&&<div className="notice notice-warn" role="status">{notice}</div>}
-    {data&&!data.enabled&&<div className="notice notice-warn"><strong>MSG91 setup needed</strong><p>Bulk SMS requires your approved MSG91 templates, private API key, delivery webhook and a running broadcast worker. You can preview the audience while setup is incomplete.</p></div>}
+    {data&&!data.enabled&&<div className="notice notice-warn"><strong>Bulk SMS unavailable</strong></div>}
     <form className="report-form record-card" onSubmit={inspect}>
       <div className="form-row"><label className="field"><span>Reviewed advisory</span><select required disabled={busy} value={form.alert_id} onChange={e=>change('alert_id',e.target.value)}><option value="">Select advisory</option>{eligible.map(a=><option key={a.id} value={a.id}>#{a.id} · {a.location} · {a.level}</option>)}</select></label>
       <label className="field"><span>Broadcast audience</span><select disabled={busy} value={form.area} onChange={e=>change('area',e.target.value)}><option value="ALERT_AREA">Advisory area only</option><option value="ALL">All monitored areas</option>{locations.map(l=><option key={l.id} value={l.id}>{l.name}, {l.state}</option>)}</select></label></div>
@@ -37,11 +37,11 @@ export default function BroadcastPanel({alerts, locations, onRefresh}) {
     {preview&&<div className="record-card"><h3>{preview.recipients.toLocaleString()} eligible numbers</h3><p>{preview.target_label} · Active, opted-in Indian mobile numbers. Duplicate numbers and previous attempts are excluded.</p>
       {preview.minimum_submission_seconds!=null&&<p>Submission needs at least {Math.ceil(preview.minimum_submission_seconds/60).toLocaleString()} minutes at the configured rate. Provider delays and worker capacity can increase this; it is not a delivery-time guarantee.</p>}
       {[...new Set(Object.values(preview.messages))].map((m,i)=><div className="sms-draft-preview" key={i}><strong>Message {i+1}</strong><p style={{whiteSpace:'pre-wrap'}}>{m}</p></div>)}
-      <p className="fine">MSG91 sends only through an approved template for each registry language. These are the rendered SMS previews; confirm the approved variables and text in MSG91 before activating. Long or multilingual SMS may cost multiple segments.</p>
+      
       {!!preview.issues?.length&&<div className="notice notice-warn"><ul>{preview.issues.map(x=><li key={x}>{x}</li>)}</ul></div>}
       <button className="btn btn-danger" disabled={busy||!preview.ready||!preview.recipients} onClick={queue}>Issue & queue broadcast</button>
     </div>}
-    <h3>Recent broadcasts</h3><p className="fine">Counts refresh every 10 seconds. COMPLETE means submission finished; SENT is not a delivery receipt. Pause and cancel affect messages still waiting.</p>
+    <h3>Recent broadcasts</h3>
     <div className="card-list">{data?.jobs?.length?data.jobs.map(j=><article className="record-card" key={j.id}><div className="record-top"><strong>Broadcast #{j.id} · {j.target_label}</strong><span className="badge">{j.status}</span></div><p>Advisory #{j.alert_id} · {j.total.toLocaleString()} numbers · Expires {new Date(j.expires_at*1000).toLocaleString()}</p>
       <div className="notification-summary">{Object.entries(j.counts).map(([s,n])=><span key={s}>{s==='READY'?'WAITING':s} <strong>{n.toLocaleString()}</strong></span>)}</div>{j.note&&<p>{j.note}</p>}
       {!!j.counts.UNKNOWN&&<p className="notice notice-warn">Some submission outcomes are unknown. Check provider logs before creating another advisory for these recipients.</p>}
