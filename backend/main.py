@@ -849,7 +849,7 @@ def satellite_packet(x):
         'pipeline_status':'SCENE_DISCOVERY_IMPLEMENTED','imagery_basemap':'NASA GIBS / Esri imagery when reachable',
         'terrain_basemap':'OpenTopoMap when reachable','analysis_mode':'SENTINEL2_SCENE_QA_PLUS_VISUAL_CONTEXT',
         'risk_level':x.get('risk_level','UNKNOWN'),'risk_percent':x.get('risk_percent'),
-        'terrain_context':{'slope_deg':x.get('slope'),'elevation_m':x.get('elevation'),'ndvi_baseline':x.get('ndvi'),'source_state':'BASELINE_DEMO'},
+        'terrain_context':{'slope_deg':None,'elevation_m':None,'ndvi_baseline':None,'source_state':'NOT_CONFIGURED'},
         'scene_discovery':{'provider':'Element 84 Earth Search','collection':'sentinel-2-l2a','status':'IMPLEMENTED',
                            'note':'PRAHARI searches real Sentinel-2 L2A acquisitions and identifies recent/reference scene pairs using acquisition date and cloud metadata.'},
         'detection_module':{'name':'Landslide4Sense-compatible post-event segmentation','status':'CHECK_MODEL_STATUS_ENDPOINT',
@@ -983,7 +983,7 @@ def satellite_architecture():
             'model_status_endpoint':'/api/satellite/model/status',
             'preprocess_status_endpoint':'/api/satellite/preprocess/status'
         },
-        'susceptibility':{'status':'BASELINE_DEMO','note':'Current slope/elevation/NDVI context is seeded prototype data, not authoritative DEM-derived raster analysis.'},
+        'susceptibility':{'status':'NOT_CONFIGURED','note':'Terrain susceptibility is unavailable until authoritative terrain inputs are configured.'},
         'deformation_monitoring':{'status':'ROADMAP','note':'Sentinel-1/InSAR slope-deformation monitoring is intentionally separate from optical post-event detection.'},
         'research_basis':{
             'landslide4sense':'Official benchmark uses 12 Sentinel-2 multispectral bands plus slope and DEM at approximately 10 m pixels.',
@@ -1181,7 +1181,7 @@ def status():
         "satellite_nrt":"NASA GIBS VIIRS NRT with pre-warm local tile cache",
         "unacknowledged_alerts":alert_count,
         "last_sync":int(time.time()),
-        "historical_replay_mode":True,
+        "historical_replay_mode":False,
         "auth_required":AUTH_REQUIRED
     }
 
@@ -1387,9 +1387,9 @@ def summary():
         "high_zones":high,
         "active_alerts":unacked,
         "citizen_reports":report_count,
-        "population_exposed_prototype":sum(x.get('population_exposed',0) for x in data if x.get('risk_level') in ('HIGH','CRITICAL')),
+        "population_exposed_prototype":None,
         "avg_risk_index":round(sum(float(x['risk_percent']) for x in assessed)/len(assessed),1) if assessed else None,
-        "note":"Risk index is an uncalibrated screening index; prototype exposure totals are not authoritative impact estimates."
+        "note":"Risk screening is separate from exposure; authoritative exposure data are not configured."
     }
 
 
@@ -2120,18 +2120,7 @@ PRECURSOR_WEIGHTS = {
 }
 SEVERITY_W = {'LOW':.2,'MODERATE':.45,'HIGH':.75,'CRITICAL':1.0}
 
-# Prototype assembly points and a tiny offline routing graph. These are not
-# official shelters; they demonstrate how verified emergency GIS would plug in.
-SHELTERS = {
-    1:[{'id':'G-A','name':'Prototype Assembly Point G-A','lat':27.344,'lon':88.606,'capacity':900}, {'id':'G-B','name':'Prototype Assembly Point G-B','lat':27.318,'lon':88.625,'capacity':700}],
-    2:[{'id':'A-A','name':'Prototype Assembly Point A-A','lat':23.742,'lon':92.710,'capacity':850}, {'id':'A-B','name':'Prototype Assembly Point A-B','lat':23.713,'lon':92.729,'capacity':650}],
-    3:[{'id':'K-A','name':'Prototype Assembly Point K-A','lat':25.690,'lon':94.100,'capacity':700}],
-    4:[{'id':'S-A','name':'Prototype Assembly Point S-A','lat':25.590,'lon':91.879,'capacity':900}],
-    5:[{'id':'I-A','name':'Prototype Assembly Point I-A','lat':27.098,'lon':93.590,'capacity':850}],
-    6:[{'id':'M-A','name':'Prototype Assembly Point M-A','lat':24.830,'lon':93.924,'capacity':800}],
-    7:[{'id':'D-A','name':'Prototype Assembly Point D-A','lat':25.200,'lon':93.012,'capacity':650}],
-    8:[{'id':'U-A','name':'Prototype Assembly Point U-A','lat':24.327,'lon':92.054,'capacity':600}],
-}
+SHELTERS = {}
 
 def _haversine(lat1,lon1,lat2,lon2):
     r=6371.0
@@ -2177,6 +2166,13 @@ def impact_assessment_value(location_id, hazard_percent=None):
         hazard_percent=current.get('risk_percent')
     comm=community_signal_value(location_id)
     assets=[i for i in INFRA if i['location_id']==location_id]
+    if not assets and x.get('population_exposed') is None:
+        return {
+            'location_id':location_id,'available':False,'hazard_index':hazard_percent,'impact_score':None,'priority':'UNKNOWN',
+            'community_signal':comm['score'],'assets_at_risk':0,'population_exposed':None,
+            'data_status':'NOT_CONFIGURED','asset_source':None,
+            'interpretation':'Exposure assessment is unavailable until authoritative assets and population data are configured.'
+        }
     if hazard_percent is None:
         return {
             'location_id':location_id,'available':False,'hazard_index':None,'impact_score':None,'priority':'UNKNOWN',
@@ -2254,7 +2250,7 @@ def response_plan(location_id:int):
     return {
         'location_id':location_id,'location':f"{x['name']}, {x['state']}",'assessment_state':current.get('assessment_status'),
         'impact':imp,'routing_suggestion':route,'recommended_action':action,
-        'route_policy':'Prototype routing suggestion only; it is never labelled safe without verified closure, hazard and shelter datasets.',
+        'route_policy':'Route guidance is unavailable unless verified road, closure and shelter datasets are configured.',
         'checklist':['Review source freshness and missing inputs','Verify field/community evidence','Escalate draft advisory to a qualified reviewer','Confirm official road/shelter information before any movement recommendation','Track acknowledgement and field outcome'],
         'ew4all_pillars':{'risk_knowledge':'GIS + traceable assessment','monitoring_forecasting':'weather + optional real telemetry','warning_communication':'reviewed advisory lifecycle','preparedness_response':'operator checklist + audit history'},
         'human_decision_gate':{'required':True,'policy':'PRAHARI provides decision support; competent geological/emergency authorities authorize public warnings, evacuation and road closure.'}
