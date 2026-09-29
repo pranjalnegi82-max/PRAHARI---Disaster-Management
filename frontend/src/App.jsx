@@ -559,24 +559,39 @@ function SatelliteSceneCard({scene,label}) {
 function RiskMapPage({locations,selected,onSelect,onAssess,assessment}) {
   const [basemap,setBasemap]=useState('street');
   const [history,setHistory]=useState([]);
-  const [forecast,setForecast]=useState(null);
-  useEffect(()=>{ if (!selected) return; Promise.allSettled([get(`/api/assessments/${selected.id}/history`),get(`/api/forecast-risk/${selected.id}`)]).then(([h,f])=>{if(h.status==='fulfilled')setHistory(h.value);if(f.status==='fulfilled')setForecast(f.value);}); },[selected?.id]);
+  useEffect(()=>{if(!selected)return;get(`/api/assessments/${selected.id}/history`).then(setHistory).catch(()=>setHistory([]));},[selected?.id]);
 
   return <div className="risk-map-page">
-    <div className="map-toolbar"><div><h1>{basemap==='intelligence'?'Satellite Intelligence':'Risk Map'}</h1><p>{basemap==='intelligence'?'Real Sentinel-2 scene review is separated from weather-risk screening and visual basemaps.':'Weather risk, field evidence and satellite context remain explicitly separated.'}</p></div><div className="segmented"><button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button><button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite view</button><button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence')}>Sentinel-2 intelligence</button></div></div>
+    <div className="map-toolbar">
+      <div><h1>{basemap==='intelligence'?'Satellite Intelligence':'Risk Map'}</h1><p>{selected?`${selected.name}, ${selected.state}`:'Hilly regions of India'}</p></div>
+      <div className="segmented">
+        <button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button>
+        <button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite</button>
+        <button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence')}>Sentinel-2</button>
+      </div>
+    </div>
 
     {basemap==='intelligence'
       ? <SatelliteIntelligence key={selected?.id} selected={selected} searchScenes={browserSentinel2Search} SceneCard={SatelliteSceneCard}/>
       : <div className="map-layout">
           <RiskMapView locations={locations} selected={selected} onSelect={onSelect} basemap={basemap}/>
           <aside className="map-detail">
-            <Panel title={selected?`${selected.name}, ${selected.state}`:'Select an area'} actions={selected&&<button className="btn btn-primary" onClick={onAssess}>Record assessment</button>}>
-              {selected && <><div className="detail-risk"><RiskBadge level={assessment?.risk_level || selected.risk_level}/><strong>{assessment?.risk_percent == null ? 'Index unavailable' : `${fmt(assessment.risk_percent,0)} / 100`}</strong></div>
-              <StateBadge state={assessment?.data_state || selected.data_state}/>
-              <dl className="kv"><dt>24 h rain</dt><dd>{fmt(assessment?.rainfall ?? selected.rainfall)} mm</dd><dt>72 h antecedent rain</dt><dd>{fmt(assessment?.antecedent_rainfall_72h ?? selected.antecedent_rainfall_72h)} mm</dd><dt>Soil wetness</dt><dd>{fmt(assessment?.soil_moisture ?? selected.soil_moisture)}%</dd><dt>Slope context</dt><dd>{fmt(selected.slope)}° <Badge>prototype</Badge></dd></dl></>}
+            <Panel title={selected?`${selected.name}, ${selected.state}`:'Select an area'} actions={selected&&<button className="btn btn-primary" onClick={onAssess}>Record</button>}>
+              {selected&&<>
+                <div className="detail-risk"><RiskBadge level={assessment?.risk_level||selected.risk_level}/><strong>{(assessment?.risk_percent??selected.risk_percent)==null?'Index unavailable':`${fmt(assessment?.risk_percent??selected.risk_percent,0)} / 100`}</strong></div>
+                <StateBadge state={assessment?.data_state||selected.data_state}/>
+                <dl className="kv">
+                  <dt>24 h rain</dt><dd>{fmt(assessment?.rainfall??selected.rainfall)} mm</dd>
+                  <dt>72 h rain</dt><dd>{fmt(assessment?.antecedent_rainfall_72h??selected.antecedent_rainfall_72h)} mm</dd>
+                  <dt>Soil wetness</dt><dd>{fmt(assessment?.soil_moisture??selected.soil_moisture)}%</dd>
+                  <dt>Local slope proxy</dt><dd>{fmt(selected.slope)}°</dd>
+                  <dt>Terrain source</dt><dd>{selected.terrain_source||'Unavailable'}</dd>
+                </dl>
+              </>}
             </Panel>
-            <details className="disclosure" open><summary>Assessment history</summary><div className="disclosure-body history-list">{history.length?history.slice(0,8).map(h=><div key={h.id}><RiskBadge level={h.risk_level}/><span>{h.mode}</span><span>{fmtTime(h.created_at)}</span></div>):<p className="muted">No recorded assessments yet.</p>}</div></details>
-            <details className="disclosure"><summary>Forecast guidance</summary><div className="disclosure-body">{forecast?.available ? <div className="forecast-list">{forecast.points.map(p=><div key={p.horizon}><strong>{p.horizon}</strong><RiskBadge level={p.risk_level}/><span>{p.risk_index ?? '—'}/100</span></div>)}</div>:<p className="muted">{forecast?.note || 'Forecast guidance unavailable.'}</p>}<p className="fine">Screening trajectory only; not a calibrated probability forecast.</p></div></details>
+            <details className="disclosure" open><summary>Assessment history</summary><div className="disclosure-body history-list">
+              {history.length?history.slice(0,8).map(h=><div key={h.id}><RiskBadge level={h.risk_level}/><span>{fmtTime(h.created_at)}</span></div>):<p className="muted">No recorded assessments.</p>}
+            </div></details>
           </aside>
         </div>}
   </div>;
