@@ -389,14 +389,51 @@ function AdminPortal({session,onLogout}) {
   </div>;
 }
 
-function LocationSelector({locations, selectedId, onSelect, compact=false}) {
-  const selected = locations.find(x=>x.id===selectedId);
-  const [query,setQuery]=useState(selected ? `${selected.name}, ${selected.state}` : '');
-  useEffect(()=>{ if(selected) setQuery(`${selected.name}, ${selected.state}`); },[selectedId, locations.length]);
-  const matches=locations.filter(x=>`${x.name} ${x.state}`.toLowerCase().includes(query.toLowerCase().trim())).slice(0,8);
+function LocationSelector({locations, selectedId, onSelect, onAdded, compact=false}) {
+  const selected=locations.find(x=>x.id===selectedId);
+  const selectedLabel=selected?`${selected.name}, ${selected.state}`:'';
+  const [query,setQuery]=useState(selectedLabel);
+  const [remote,setRemote]=useState([]);
+  const [searching,setSearching]=useState(false);
+  const [adding,setAdding]=useState('');
+
+  useEffect(()=>{if(selected)setQuery(selectedLabel);},[selectedId,selectedLabel]);
+
+  useEffect(()=>{
+    const q=query.trim();
+    if(q.length<2 || q===selectedLabel){setRemote([]);setSearching(false);return;}
+    const timer=setTimeout(async()=>{
+      setSearching(true);
+      try{setRemote(await get(`/api/locations/search?q=${encodeURIComponent(q)}`));}
+      catch{setRemote([]);}
+      finally{setSearching(false);}
+    },320);
+    return()=>clearTimeout(timer);
+  },[query,selectedLabel]);
+
+  const local=locations.filter(x=>`${x.name} ${x.state}`.toLowerCase().includes(query.toLowerCase().trim())).slice(0,6);
+  const remoteOnly=remote.filter(r=>!local.some(x=>Math.abs(x.lat-r.lat)<0.0005&&Math.abs(x.lon-r.lon)<0.0005)).slice(0,6);
+  const open=query.trim().length>=2 && query!==selectedLabel;
+
+  async function chooseRemote(r){
+    if(r.monitored_location_id){onSelect(r.monitored_location_id);setQuery(`${r.name}, ${r.state}`);return;}
+    setAdding(r.provider_id||`${r.lat},${r.lon}`);
+    try{
+      const added=await post('/api/locations',{name:r.name,state:r.state,lat:r.lat,lon:r.lon,source_ref:r.provider_id||null});
+      await onAdded?.(added.id);
+      setQuery(`${added.name}, ${added.state}`);
+      setRemote([]);
+    }finally{setAdding('');}
+  }
+
   return <div className={`location-search ${compact?'location-search-compact':''}`}>
-    <label className="field location-select"><span className={compact?'sr-only':''}>Search / select area</span><span className="search-icon"><Icon name="search" size={17}/></span><input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search location in Northeast India…" aria-controls="location-results"/></label>
-    {query && selected && query !== `${selected.name}, ${selected.state}` && <div className="location-results" id="location-results">{matches.length?matches.map(x=><button key={x.id} onClick={()=>{onSelect(x.id);setQuery(`${x.name}, ${x.state}`)}}><strong>{x.name}</strong><span>{x.state}</span></button>):<span>No configured area matches. General geocoding is not connected yet.</span>}</div>}
+    <label className="field location-select"><span className={compact?'sr-only':''}>Location</span><span className="search-icon"><Icon name="search" size={17}/></span><input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search hilly region in India…" aria-controls="location-results" autoComplete="off"/></label>
+    {open&&<div className="location-results" id="location-results">
+      {local.map(x=><button key={`local-${x.id}`} onClick={()=>{onSelect(x.id);setQuery(`${x.name}, ${x.state}`)}}><strong>{x.name}</strong><span>{x.state}</span><b>MONITORED</b></button>)}
+      {remoteOnly.map(x=><button key={`remote-${x.provider_id||x.lat+'-'+x.lon}`} disabled={!!adding} onClick={()=>chooseRemote(x)}><strong>{x.name}</strong><span>{x.state}{x.elevation_m!=null?` · ${Math.round(x.elevation_m)} m`:''}</span><b>{x.monitored_location_id?'OPEN':adding===(x.provider_id||`${x.lat},${x.lon}`)?'ADDING…':'ADD'}</b></button>)}
+      {searching&&<span className="location-search-status">Searching…</span>}
+      {!searching&&local.length===0&&remoteOnly.length===0&&<span className="location-search-status">No results</span>}
+    </div>}
   </div>;
 }
 
