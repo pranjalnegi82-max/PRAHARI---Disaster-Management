@@ -3,6 +3,14 @@ import {MapContainer, TileLayer, CircleMarker, Popup} from 'react-leaflet';
 import {get, post, downloadUrl} from './api.js';
 
 const value = v => v == null ? 'Unavailable' : Number(v).toFixed(1);
+function validateAssessment(data) {
+  if (!data || typeof data.status !== 'string' || !Array.isArray(data.windows) ||
+      !Array.isArray(data.missing) || !Array.isArray(data.limitations) ||
+      !data.basin || !Array.isArray(data.basin.villages) || data.basin.villages.length === 0) {
+    throw new Error('Flood data is incomplete. Please retry after the flood service is available.');
+  }
+  return data;
+}
 const date = v => v ? new Date(v * 1000).toLocaleString() : 'Unavailable';
 
 export default function FlashFloodPanel({selected, mode='live', readOnly=false, onRefreshAlerts}) {
@@ -14,19 +22,19 @@ export default function FlashFloodPanel({selected, mode='live', readOnly=false, 
     const controller=new AbortController();
     setBusy(true);
     Promise.all([get(`/api/flood/screen/${id}?mode=${mode}`,{signal:controller.signal}),get(`/api/flood/history/${id}`,{signal:controller.signal})])
-      .then(([r,h])=>{setResult(r);setConfig(JSON.stringify(r.basin,null,2));setHistory(h);})
+      .then(([r,h])=>{validateAssessment(r);setResult(r);setConfig(JSON.stringify(r.basin,null,2));setHistory(h);})
       .catch(e=>{if(!controller.signal.aborted)setError(e.message);})
       .finally(()=>{if(!controller.signal.aborted)setBusy(false);});
     return ()=>controller.abort();
   },[id,mode]);
   async function run(){
     setBusy(true);setError('');setNotice('');setRecordId(null);
-    try{const out=await post(`/api/flood/assessments/${id}?mode=${mode}`,{});setResult(out.assessment);setRecordId(out.id);setHistory(await get(`/api/flood/history/${id}`));setNotice(`Flood assessment #${out.id} recorded. No messages have been sent.`);}
+    try{const out=await post(`/api/flood/assessments/${id}?mode=${mode}`,{});setResult(validateAssessment(out.assessment));setRecordId(out.id);setHistory(await get(`/api/flood/history/${id}`));setNotice(`Flood assessment #${out.id} recorded. No messages have been sent.`);}
     catch(e){setError(e.message);}finally{setBusy(false);}
   }
   async function save(){
     setBusy(true);setError('');setNotice('');
-    try{await post(`/api/flood/basins/${id}`,JSON.parse(config));setRecordId(null);setResult(await get(`/api/flood/screen/${id}?mode=${mode}`));setNotice('Catchment configuration saved. CONFIGURED does not mean scientifically validated.');}
+    try{await post(`/api/flood/basins/${id}`,JSON.parse(config));setRecordId(null);setResult(validateAssessment(await get(`/api/flood/screen/${id}?mode=${mode}`)));setNotice('Catchment configuration saved. CONFIGURED does not mean scientifically validated.');}
     catch(e){setError(e.message);}finally{setBusy(false);}
   }
   async function draft(){
