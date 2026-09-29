@@ -37,7 +37,7 @@ def assess(values: dict[str, Any], telemetry_source: str | None = None) -> Basel
     missing = [k for k, v in required.items() if v is None]
     limitations = [
         "This is a transparent screening baseline, not a calibrated landslide probability.",
-        "Thresholds are research-informed generic screening rules and are not locally calibrated warning thresholds for Northeast India.",
+        "Thresholds are research-informed screening rules and are not locally calibrated warning thresholds for the monitored hilly region.",
     ]
     if missing:
         return BaselineResult("INSUFFICIENT_DATA", "UNKNOWN", None, [], missing, limitations)

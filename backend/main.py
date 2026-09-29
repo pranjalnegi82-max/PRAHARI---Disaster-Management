@@ -127,7 +127,10 @@ DATA_CATALOG = {
 # do not change minute-to-minute. A short cache avoids hammering the public API.
 LIVE_WEATHER_CACHE = {}
 LIVE_REGIONAL_CACHE = {"ts": 0, "data": None}
+TERRAIN_CONTEXT_CACHE = {"ts": 0, "data": None}
 LIVE_TTL_SECONDS = WEATHER_CACHE_TTL_SECONDS
+TERRAIN_TTL_SECONDS = 30 * 86400
+TERRAIN_CACHE_KEY = "open-meteo-terrain:v1"
 
 def _cache_key_weather(location_id:int) -> str:
     return f"open-meteo:{location_id}"
@@ -226,6 +229,134 @@ def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
             if attempt < attempts-1:
                 time.sleep(0.8 * (attempt+1))
     raise last_error or RuntimeError('Weather provider request failed')
+
+def _terrain_sample_coordinates(location):
+    """Return center/N/S/E/W points approximately 1 km from the monitoring point."""
+    lat=float(location['lat']); lon=float(location['lon'])
+    dlat=1.0/111.32
+    coslat=max(0.2, abs(math.cos(math.radians(lat))))
+    dlon=1.0/(111.32*coslat)
+    return [(lat,lon),(lat+dlat,lon),(lat-dlat,lon),(lat,lon+dlon),(lat,lon-dlon)]
+
+def _terrain_from_elevations(location, elevations):
+    vals=[]
+    for v in elevations:
+        try:
+            vals.append(float(v))
+        except (TypeError, ValueError):
+            return None
+    if len(vals)!=5 or not all(math.isfinite(v) for v in vals):
+        return None
+    center,north,south,east,west=vals
+    # Opposing samples are ~2 km apart. atan(gradient) gives a local terrain
+    # gradient estimate from provider elevation data rather than a seeded slope.
+    dz_ns=(north-south)/2000.0
+    dz_ew=(east-west)/2000.0
+    slope=math.degrees(math.atan(math.sqrt(dz_ns*dz_ns+dz_ew*dz_ew)))
+    return {
+        'slope_deg':round(slope,1),
+        'elevation_m':round(center,1),
+        'local_relief_m':round(max(vals)-min(vals),1),
+        'sample_spacing_m':1000,
+        'source':'Open-Meteo elevation grid',
+        'method':'central gradient from N/S/E/W samples approximately 1 km from the monitoring point'
+    }
+
+def terrain_context_map(force=False, data_override=None):
+    """Get real provider-derived terrain gradients for every monitored location.
+
+    Terrain is cached for 30 days because elevation is static. Browser-provided
+    terrain may be supplied when shared cloud egress is throttled.
+    """
+    now=int(time.time())
+    cached=TERRAIN_CONTEXT_CACHE.get('data')
+    if data_override is None and cached and not force and now-int(TERRAIN_CONTEXT_CACHE.get('ts') or 0)<TERRAIN_TTL_SECONDS:
+        return cached
+
+    if isinstance(data_override, dict):
+        out={}
+        for k,v in data_override.items():
+            try: lid=int(k)
+            except (TypeError,ValueError): continue
+            if not isinstance(v,dict): continue
+            try:
+                slope=float(v.get('slope_deg')); elev=float(v.get('elevation_m'))
+            except (TypeError,ValueError): continue
+            if math.isfinite(slope) and 0<=slope<=90 and math.isfinite(elev):
+                out[lid]={
+                    'slope_deg':round(slope,1),'elevation_m':round(elev,1),
+                    'local_relief_m':v.get('local_relief_m'),'sample_spacing_m':v.get('sample_spacing_m',1000),
+                    'source':'Open-Meteo elevation grid','method':v.get('method') or 'browser-derived terrain gradient'
+                }
+        if out:
+            merged=dict(TERRAIN_CONTEXT_CACHE.get('data') or {})
+            merged.update(out)
+            TERRAIN_CONTEXT_CACHE.update(ts=now,data=merged)
+            return merged
+
+    persisted=_load_source_cache(TERRAIN_CACHE_KEY)
+    if persisted and not force:
+        try:
+            age=max(0,now-int(persisted.get('fetched_at') or 0))
+            if age<TERRAIN_TTL_SECONDS:
+                out={int(k):v for k,v in (persisted.get('payload') or {}).items()}
+                TERRAIN_CONTEXT_CACHE.update(ts=now,data=out)
+                return out
+        except Exception:
+            pass
+
+    samples=[]
+    owners=[]
+    for loc in LOCATIONS:
+        coords=_terrain_sample_coordinates(loc)
+        samples.extend(coords)
+        owners.extend([loc['id']]*len(coords))
+    params={
+        'latitude':','.join(str(x[0]) for x in samples),
+        'longitude':','.join(str(x[1]) for x in samples),
+        'timezone':'UTC',
+        'current':'temperature_2m',
+        'forecast_hours':1,
+    }
+    url='https://api.open-meteo.com/v1/forecast?'+urlencode(params)
+    try:
+        raw=_fetch_json_with_retries(url,min(WEATHER_TIMEOUT_SECONDS,10),attempts=1)
+        rows=raw if isinstance(raw,list) else [raw]
+        if len(rows)!=len(samples):
+            raise ValueError('Unexpected terrain response shape')
+        by_id={}
+        for lid,row in zip(owners,rows):
+            by_id.setdefault(lid,[]).append(row.get('elevation') if isinstance(row,dict) else None)
+        out={}
+        for loc in LOCATIONS:
+            context=_terrain_from_elevations(loc,by_id.get(loc['id'],[]))
+            if context: out[loc['id']]=context
+        if out:
+            TERRAIN_CONTEXT_CACHE.update(ts=now,data=out)
+            _persist_source_cache(TERRAIN_CACHE_KEY,'Open-Meteo elevation grid',{str(k):v for k,v in out.items()})
+            return out
+    except Exception:
+        pass
+
+    if persisted:
+        try:
+            out={int(k):v for k,v in (persisted.get('payload') or {}).items()}
+            if out:
+                TERRAIN_CONTEXT_CACHE.update(ts=now,data=out)
+                return out
+        except Exception:
+            pass
+    return {}
+
+def _apply_terrain(packet, terrain):
+    out=dict(packet)
+    if terrain:
+        out['terrain_slope_deg']=terrain.get('slope_deg')
+        out['terrain_elevation_m']=terrain.get('elevation_m')
+        out['terrain_local_relief_m']=terrain.get('local_relief_m')
+        out['terrain_source']=terrain.get('source')
+        out['terrain_method']=terrain.get('method')
+    return out
 
 def fetch_live_weather(x, force=False, data_override=None):
     now = int(time.time())
@@ -380,6 +511,10 @@ def fetch_live_weather(x, force=False, data_override=None):
             packet['source']='Open-Meteo direct browser feed'
             packet['transport']='BROWSER_DIRECT_RELAY'
             packet['note']='Current Open-Meteo data fetched directly by the authenticated browser because server egress was rate-limited. Provider payload was parsed server-side but not independently re-fetched.'
+            # Keep a short-lived in-memory copy so flood and landslide modules use
+            # the same real provider packet without a second throttled server call.
+            # Browser-relayed data is never written to the durable trusted cache.
+            LIVE_WEATHER_CACHE[x['id']]={'cached_at':now,'packet':packet}
         return packet
     except Exception as e:
         # Never invent live observations. Prefer a timestamp-preserving cached public packet;
@@ -434,6 +569,11 @@ def enrich_with_live(x, packet, telemetry_row=None, load_telemetry=True):
     d['rain_forecast_72h_mm']=packet.get('rain_forecast_72h_mm')
     d['rain_probability_24h']=packet.get('max_rain_probability_24h')
     d['soil_moisture_m3m3']=packet.get('soil_moisture_m3m3')
+    d['slope']=packet.get('terrain_slope_deg')
+    d['elevation']=packet.get('terrain_elevation_m') if packet.get('terrain_elevation_m') is not None else packet.get('elevation_model_m')
+    d['terrain_local_relief_m']=packet.get('terrain_local_relief_m')
+    d['terrain_source']=packet.get('terrain_source')
+    d['terrain_method']=packet.get('terrain_method')
     d['month']=datetime.now().month
 
     if load_telemetry:
@@ -488,6 +628,14 @@ def enrich_with_live(x, packet, telemetry_row=None, load_telemetry=True):
             'note':packet.get('note')
         },
     ]
+    if d.get('slope') is not None:
+        d['sources'].append({
+            'id':'open_meteo_terrain','name':'Open-Meteo elevation grid','state':'CURRENT',
+            'timestamp':None,'units':{'elevation':'m','terrain_gradient':'deg'},
+            'coverage':'local N/S/E/W samples','spatial_resolution':'provider elevation grid',
+            'freshness':'static terrain cached for 30 days','origin':'https://open-meteo.com/',
+            'note':'Terrain gradient is computed from real provider elevations around the monitoring point.'
+        })
     if tele:
         d['sources'].append({'id':'field_telemetry','name':'Field sensor telemetry','state':('CURRENT' if fresh_tele else 'STALE') if tele.get('source')=='REAL_SENSOR' else tele.get('source'),
             'timestamp':tele.get('created_at'),'units':'sensor-specific','coverage':tele.get('station_id'),'spatial_resolution':'point sensor',
@@ -498,15 +646,16 @@ def locs():
     cache_keys=[_cache_key_weather(x['id']) for x in LOCATIONS]
     persisted = _load_source_cache_map(cache_keys)
     telemetry = latest_telemetry_map([x['id'] for x in LOCATIONS]) if 'latest_telemetry_map' in globals() else {}
+    terrain = terrain_context_map()
     return [
         enrich_with_live(
             x,
-            _missing_or_cached_packet(
+            _apply_terrain(_missing_or_cached_packet(
                 x,
                 'Live data not loaded',
                 persisted_cache=persisted.get(_cache_key_weather(x['id'])),
                 load_persisted=False,
-            ),
+            ), terrain.get(x['id'])),
             telemetry_row=telemetry.get(x['id']),
             load_telemetry=False,
         )
@@ -593,10 +742,11 @@ def live_locs(force=False, mode='live'):
             )
 
     telemetry = latest_telemetry_map([x['id'] for x in LOCATIONS]) if 'latest_telemetry_map' in globals() else {}
+    terrain = terrain_context_map()
     data=[
         enrich_with_live(
             x,
-            packets[x['id']],
+            _apply_terrain(packets[x['id']], terrain.get(x['id'])),
             telemetry_row=telemetry.get(x['id']),
             load_telemetry=False,
         )
@@ -1221,7 +1371,7 @@ def startup_seed():
 
 @app.get("/")
 def root():
-    return {"service":"PRAHARI","status":"ok","version":"10.0.0","mode":"traceable-advisory-decision-support"}
+    return {"service":"PRAHARI","status":"ok","version":"11.1.0","mode":"traceable-advisory-decision-support"}
 
 
 @app.get("/api/system/status")
@@ -1239,6 +1389,7 @@ def status():
         "satellite_intelligence":"Sentinel-2 live scene discovery/pairing + optional Landslide4Sense-compatible U-Net adapter; live 14-channel research patch preparation; inference requires verified weights and matching input profile",
         "map":"offline EO Lite / cached NASA / street / terrain / satellite",
         "weather":"Open-Meteo current/stale/missing states; no invented live fallback",
+        "terrain":"Open-Meteo provider elevations with local gradient derived from 1 km N/S/E/W samples",
         "live_risk_refresh":"5-minute cache / manual force refresh",
         "satellite_nrt":"NASA GIBS VIIRS NRT with pre-warm local tile cache",
         "unacknowledged_alerts":alert_count,
@@ -1280,11 +1431,12 @@ def live_location(location_id:int, force:bool=False, mode:Literal['live']='live'
     if not x:
         raise HTTPException(404,"Location not found")
     packet=fetch_live_weather(x, force=force)
-    return enrich_with_live(x, packet)
+    terrain=terrain_context_map().get(x['id'])
+    return enrich_with_live(x, _apply_terrain(packet,terrain))
 
 @app.post("/api/live/browser-relay/{location_id}", tags=["System"])
 def browser_relay_live(location_id:int, body:dict, role:str=Depends(resolve_role)):
-    # Read-only prototype fallback. Authentication is still required in deployed
+    # Read-only provider transport fallback. Authentication is still required in deployed
     # mode, but FIELD_OFFICER is intentionally allowed because this endpoint does
     # not persist data or issue alerts.
     if AUTH_REQUIRED and role == 'PUBLIC':
@@ -1295,7 +1447,8 @@ def browser_relay_live(location_id:int, body:dict, role:str=Depends(resolve_role
     if str(body.get('provider') or '').upper() != 'OPEN_METEO' or not isinstance(body.get('payload'),dict):
         raise HTTPException(400,'Valid OPEN_METEO provider payload required')
     packet=fetch_live_weather(x, force=True, data_override=body['payload'])
-    result=enrich_with_live(x,packet)
+    terrain=terrain_context_map(data_override={str(location_id):body.get('terrain')}).get(location_id) if isinstance(body.get('terrain'),dict) else terrain_context_map().get(location_id)
+    result=enrich_with_live(x,_apply_terrain(packet,terrain))
     result['assessment_limitations']=list(result.get('assessment_limitations') or []) + [
         'Live weather was fetched directly by the authenticated browser because the hosting provider egress was throttled. The server parsed but did not independently re-fetch this provider response.'
     ]
@@ -1310,7 +1463,8 @@ def record_browser_relay_assessment(location_id:int, body:dict, role:str=Depends
     if str(body.get('provider') or '').upper() != 'OPEN_METEO' or not isinstance(body.get('payload'),dict):
         raise HTTPException(400,'Valid OPEN_METEO provider payload required')
     packet=fetch_live_weather(x, force=True, data_override=body['payload'])
-    result=enrich_with_live(x,packet)
+    terrain=terrain_context_map(data_override={str(location_id):body.get('terrain')}).get(location_id) if isinstance(body.get('terrain'),dict) else terrain_context_map().get(location_id)
+    result=enrich_with_live(x,_apply_terrain(packet,terrain))
     result['assessment_limitations']=list(result.get('assessment_limitations') or []) + [
         'Recorded from an authenticated browser-relayed Open-Meteo response because the hosting provider egress was throttled. This transport fallback should be replaced by server-managed provider access for production warning operations.'
     ]
@@ -2569,4 +2723,9 @@ app.include_router(broadcast_routes(db, LOCATIONS, _alert_broadcast_text))
 
 
 from flood_api import routes as flood_routes
-app.include_router(flood_routes(db, LOCATIONS, lambda x: fetch_live_weather(x), localized_alert))
+app.include_router(flood_routes(
+    db,
+    LOCATIONS,
+    lambda x: _apply_terrain(fetch_live_weather(x), terrain_context_map().get(x['id'])),
+    localized_alert,
+))

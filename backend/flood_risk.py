@@ -20,7 +20,7 @@ def assess(packet, basin, sensor=None, now=0):
     missing = []
     if wet is None: missing.append('soil_wetness_proxy_pct')
     if antecedent is None: missing.append('antecedent_rainfall_72h_mm')
-    if state not in ('CURRENT', 'STALE', 'HISTORICAL_REPLAY'): missing.append('weather_packet')
+    if state not in ('CURRENT', 'STALE'): missing.append('weather_packet')
     valid_at = number(packet.get('valid_at_epoch'), hi=1e12)
     if state == 'CURRENT' and (valid_at is None or not 0 <= now - valid_at <= 10800):
         missing.append('current_provider_timestamp')
@@ -48,10 +48,15 @@ def assess(packet, basin, sensor=None, now=0):
             'data_state': state, 'source': packet.get('source'), 'valid_time': packet.get('valid_time'),
             'fetched_at': packet.get('updated_at'), 'valid_at_epoch': valid_at, 'soil_wetness_proxy_pct': wet, 'antecedent_rainfall_72h_mm': antecedent,
             'basin': basin, 'sensor': sensor, 'sensor_used': sensor_used, 'stage_exceeded': bool(stage_exceeded),
+            'terrain_slope_deg': number(packet.get('terrain_slope_deg'), hi=90),
+            'terrain_elevation_m': number(packet.get('terrain_elevation_m'), lo=-500, hi=9000),
+            'terrain_local_relief_m': number(packet.get('terrain_local_relief_m'), hi=10000),
+            'terrain_source': packet.get('terrain_source'),
             'probability': None, 'validated_lead_time_minutes': None,
-            'limitations': ['Experimental rainfall-threshold screening; thresholds and wetness adjustment require local calibration.',
+            'limitations': ([('Automatic research-screening profile is active; locally verified catchment thresholds are not configured.' if basin.get('context_status') == 'AUTO_SCREENING' else 'Configured rainfall thresholds are used for this monitored area.')] + [
+                'Rainfall thresholds and wetness adjustment are screening rules and require local calibration.',
                 'Weather is sampled at the configured area point, not averaged over a delineated catchment.',
                 'Forecast windows are rainfall accumulation periods, not flood arrival times or evacuation lead times.',
                 'No discharge routing, flood depth or inundation boundary is calculated.',
-                'Village points indicate configured recipients/settlements, not validated flood exposure.',
-                'Slope stability and landslide history are supporting context, not substitutes for a flood model.']}
+                'Village points indicate monitoring/recipient locations, not validated flood exposure.',
+                'Slope stability and landslide history are supporting context, not substitutes for a flood model.'])}
