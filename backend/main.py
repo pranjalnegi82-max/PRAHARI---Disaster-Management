@@ -54,43 +54,50 @@ DB = DB_PATH
 TILE_CACHE = BASE / "tile_cache" / "nasa"
 TILE_CACHE.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="PRAHARI Command Center API", version="10.0.0", description="Traceable landslide risk assessment with separate admin and field-officer portals for SIH26192")
+app = FastAPI(title="PRAHARI Command Center API", version="11.0.0", description="Multi-source flash-flood and hill-hazard monitoring for hilly regions of India")
 app.add_middleware(GZipMiddleware, minimum_size=700)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-PRAHARI-Key"],
 )
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS)), name="uploads")
 
 LOCATIONS = [
-    {"id":1,"name":"Gangtok","state":"Sikkim","lat":27.3314,"lon":88.6138,"rainfall":168,"soil_moisture":84,"slope":46,"elevation":1650,"historical_risk":0.82,"ndvi":0.61,"population_exposed":14200},
-    {"id":2,"name":"Aizawl","state":"Mizoram","lat":23.7271,"lon":92.7176,"rainfall":132,"soil_moisture":76,"slope":41,"elevation":1132,"historical_risk":0.72,"ndvi":0.67,"population_exposed":9700},
-    {"id":3,"name":"Kohima","state":"Nagaland","lat":25.6751,"lon":94.1086,"rainfall":95,"soil_moisture":62,"slope":34,"elevation":1444,"historical_risk":0.52,"ndvi":0.73,"population_exposed":6300},
-    {"id":4,"name":"Shillong","state":"Meghalaya","lat":25.5788,"lon":91.8933,"rainfall":82,"soil_moisture":58,"slope":29,"elevation":1525,"historical_risk":0.45,"ndvi":0.69,"population_exposed":5100},
-    {"id":5,"name":"Itanagar","state":"Arunachal Pradesh","lat":27.0844,"lon":93.6053,"rainfall":145,"soil_moisture":80,"slope":44,"elevation":320,"historical_risk":0.78,"ndvi":0.76,"population_exposed":11400},
-    {"id":6,"name":"Imphal East","state":"Manipur","lat":24.8170,"lon":93.9368,"rainfall":72,"soil_moisture":54,"slope":22,"elevation":786,"historical_risk":0.35,"ndvi":0.64,"population_exposed":3700},
-    {"id":7,"name":"Dima Hasao","state":"Assam","lat":25.1870,"lon":93.0250,"rainfall":154,"soil_moisture":79,"slope":43,"elevation":980,"historical_risk":0.76,"ndvi":0.71,"population_exposed":8200},
-    {"id":8,"name":"Unakoti","state":"Tripura","lat":24.3150,"lon":92.0670,"rainfall":61,"soil_moisture":49,"slope":18,"elevation":220,"historical_risk":0.24,"ndvi":0.70,"population_exposed":2400},
+    # Curated real place coordinates spanning major Indian hill systems. These
+    # records are only monitoring points; no synthetic hazard attributes are attached.
+    {"id":1,"name":"Gangtok","state":"Sikkim","country":"India","lat":27.3314,"lon":88.6138,"source":"CURATED_PLACE"},
+    {"id":2,"name":"Aizawl","state":"Mizoram","country":"India","lat":23.7271,"lon":92.7176,"source":"CURATED_PLACE"},
+    {"id":3,"name":"Kohima","state":"Nagaland","country":"India","lat":25.6751,"lon":94.1086,"source":"CURATED_PLACE"},
+    {"id":4,"name":"Shillong","state":"Meghalaya","country":"India","lat":25.5788,"lon":91.8933,"source":"CURATED_PLACE"},
+    {"id":5,"name":"Itanagar","state":"Arunachal Pradesh","country":"India","lat":27.0844,"lon":93.6053,"source":"CURATED_PLACE"},
+    {"id":6,"name":"Manali","state":"Himachal Pradesh","country":"India","lat":32.2396,"lon":77.1887,"source":"CURATED_PLACE"},
+    {"id":7,"name":"Shimla","state":"Himachal Pradesh","country":"India","lat":31.1048,"lon":77.1734,"source":"CURATED_PLACE"},
+    {"id":8,"name":"Nainital","state":"Uttarakhand","country":"India","lat":29.3919,"lon":79.4542,"source":"CURATED_PLACE"},
+    {"id":9,"name":"Joshimath","state":"Uttarakhand","country":"India","lat":30.5553,"lon":79.5650,"source":"CURATED_PLACE"},
+    {"id":10,"name":"Pithoragarh","state":"Uttarakhand","country":"India","lat":29.5829,"lon":80.2182,"source":"CURATED_PLACE"},
+    {"id":11,"name":"Dharamshala","state":"Himachal Pradesh","country":"India","lat":32.2190,"lon":76.3234,"source":"CURATED_PLACE"},
+    {"id":12,"name":"Srinagar","state":"Jammu and Kashmir","country":"India","lat":34.0837,"lon":74.7973,"source":"CURATED_PLACE"},
+    {"id":13,"name":"Leh","state":"Ladakh","country":"India","lat":34.1526,"lon":77.5771,"source":"CURATED_PLACE"},
+    {"id":14,"name":"Darjeeling","state":"West Bengal","country":"India","lat":27.0410,"lon":88.2663,"source":"CURATED_PLACE"},
+    {"id":15,"name":"Tawang","state":"Arunachal Pradesh","country":"India","lat":27.5861,"lon":91.8594,"source":"CURATED_PLACE"},
+    {"id":16,"name":"Haflong","state":"Assam","country":"India","lat":25.1648,"lon":93.0176,"source":"CURATED_PLACE"},
+    {"id":17,"name":"Munnar","state":"Kerala","country":"India","lat":10.0889,"lon":77.0595,"source":"CURATED_PLACE"},
+    {"id":18,"name":"Kalpetta","state":"Kerala","country":"India","lat":11.6087,"lon":76.0834,"source":"CURATED_PLACE"},
+    {"id":19,"name":"Ooty","state":"Tamil Nadu","country":"India","lat":11.4102,"lon":76.6950,"source":"CURATED_PLACE"},
+    {"id":20,"name":"Kodaikanal","state":"Tamil Nadu","country":"India","lat":10.2381,"lon":77.4892,"source":"CURATED_PLACE"},
+    {"id":21,"name":"Madikeri","state":"Karnataka","country":"India","lat":12.4244,"lon":75.7382,"source":"CURATED_PLACE"},
+    {"id":22,"name":"Mahabaleshwar","state":"Maharashtra","country":"India","lat":17.9307,"lon":73.6477,"source":"CURATED_PLACE"},
+    {"id":23,"name":"Mount Abu","state":"Rajasthan","country":"India","lat":24.5926,"lon":72.7156,"source":"CURATED_PLACE"},
+    {"id":24,"name":"Pachmarhi","state":"Madhya Pradesh","country":"India","lat":22.4674,"lon":78.4346,"source":"CURATED_PLACE"},
 ]
 
-ROUTES = [
-    {"id":1,"route":"NH-10: Rangpo → Gangtok","location_id":1,"status":"RESTRICTED","reason":"High slope saturation","priority":"CRITICAL"},
-    {"id":2,"route":"NH-54: Kolasib → Aizawl","location_id":2,"status":"CAUTION","reason":"Persistent rainfall","priority":"HIGH"},
-    {"id":3,"route":"NH-27: Haflong sector","location_id":7,"status":"RESTRICTED","reason":"Debris-flow susceptibility","priority":"HIGH"},
-    {"id":4,"route":"NH-2: Kohima approach","location_id":3,"status":"OPEN","reason":"Moderate monitoring","priority":"MODERATE"},
-    {"id":5,"route":"Shillong bypass","location_id":4,"status":"OPEN","reason":"Stable conditions","priority":"LOW"},
-]
-
-INFRA = [
-    {"type":"Village","name":"Upper Ranka cluster","location_id":1,"distance_km":1.8,"people":2100},
-    {"type":"School","name":"Hillview Senior Secondary","location_id":1,"distance_km":2.4,"people":640},
-    {"type":"Hospital","name":"District Referral Centre","location_id":2,"distance_km":3.2,"people":0},
-    {"type":"Bridge","name":"Haflong approach bridge","location_id":7,"distance_km":0.9,"people":0},
-    {"type":"Village","name":"Itanagar hillside ward","location_id":5,"distance_km":1.3,"people":1750},
-]
+# Operational endpoints never return invented road, shelter or infrastructure
+# inventories. Verified agency GIS can be connected later through dedicated sources.
+ROUTES = []
+INFRA = []
 
 DATA_CATALOG = {
     "open_meteo": {
@@ -98,11 +105,11 @@ DATA_CATALOG = {
         "origin": "https://open-meteo.com/", "coverage": "global", "spatial_resolution": "provider/model dependent",
         "freshness": "current/hourly model fields", "license_note": "See provider terms; values are model-derived observations/forecasts, not station measurements."
     },
-    "prototype_terrain": {
-        "name": "PRAHARI prototype terrain context", "kind": "prototype_context", "status": "BASELINE_DEMO",
-        "origin": "bundled project seed data", "coverage": "8 selected NER demonstration locations",
-        "spatial_resolution": "point attributes", "freshness": "static",
-        "license_note": "Not an authoritative terrain or susceptibility dataset. Replace with verified DEM/lithology/inventory layers for deployment."
+    "open_meteo_elevation": {
+        "name": "Open-Meteo Elevation API", "kind": "terrain_elevation", "status": "LIVE_WHEN_REACHABLE",
+        "origin": "https://open-meteo.com/en/docs/elevation-api", "coverage": "global",
+        "spatial_resolution": "provider DEM dependent", "freshness": "static terrain",
+        "license_note": "Elevation samples are provider-derived. PRAHARI derives a local slope proxy from a 3×3 neighborhood and preserves source provenance."
     },
     "nasa_gibs": {
         "name": "NASA EOSDIS GIBS VIIRS imagery", "kind": "visual_satellite_basemap", "status": "VISUAL_ONLY",
@@ -133,20 +140,25 @@ DATA_CATALOG = {
 REPLAY_NOTICE = "Historical replay/demo data. Values are bundled examples for workflow testing and must not be presented as current observations."
 
 def build_replay_packet(x):
+    """Synthetic QA fixture. Disabled unless explicitly enabled for automated tests."""
+    if not _test_fixtures_enabled():
+        raise HTTPException(404, "Replay fixtures are disabled")
+    now=int(time.time())
     return {
         'availability':'HISTORICAL_REPLAY','live':False,'stale_public':False,'location_id':x['id'],
-        'location':f"{x['name']}, {x['state']}",'source':'PRAHARI historical replay fixture',
-        'source_url':None,'updated_at':int(time.time()),'valid_time':'DEMO_REPLAY',
-        'temperature_c':None,'humidity':None,'precipitation_now_mm':None,'rain_now_mm':None,
-        'cloud_cover_pct':None,'wind_kmh':None,'wind_gust_kmh':None,'soil_moisture_m3m3':None,
-        'soil_moisture_proxy_pct':x['soil_moisture'],'rainfall_6h_mm':round(x['rainfall']/5,1),
-        'rainfall_24h_mm':x['rainfall'],'antecedent_rainfall_72h_mm':round(x['rainfall']*2.15,1),
-        'cumulative_rainfall_7d_mm':round(x['rainfall']*4.6,1),'effective_rainfall_11d_mm':round(x['rainfall']*3.1,1),
-        'max_hourly_rain_24h_mm':round(x['rainfall']/10,1),'rain_forecast_6h_mm':0.0,
-        'rain_forecast_24h_mm':0.0,'rain_forecast_48h_mm':0.0,'rain_forecast_72h_mm':0.0,
-        'max_rain_probability_24h':None,'forecast':[],'note':REPLAY_NOTICE
+        'location':f"{x['name']}, {x['state']}",'source':'PRAHARI automated-test fixture',
+        'source_url':None,'updated_at':now,'valid_time':'TEST_FIXTURE','valid_at_epoch':now,
+        'temperature_c':None,'humidity':80,'precipitation_now_mm':0,'rain_now_mm':0,
+        'cloud_cover_pct':90,'wind_kmh':5,'wind_gust_kmh':8,'soil_moisture_m3m3':0.42,
+        'soil_moisture_proxy_pct':84,'rainfall_6h_mm':34,'rainfall_24h_mm':168,
+        'antecedent_rainfall_72h_mm':360,'cumulative_rainfall_7d_mm':720,
+        'effective_rainfall_11d_mm':520,'max_hourly_rain_24h_mm':28,
+        'rain_forecast_1h_mm':38,'rain_forecast_3h_mm':82,'rain_forecast_6h_mm':125,
+        'rain_forecast_24h_mm':140,'rain_forecast_48h_mm':180,'rain_forecast_72h_mm':210,
+        'max_rain_probability_24h':95,'forecast':[],
+        'terrain_slope_deg':46.0,'elevation_model_m':1650.0,
+        'note':'Synthetic data for automated tests only.'
     }
-
 
 # ---- Live public-data integration -------------------------------------------------
 # Open-Meteo provides the latest continuously updated weather-model conditions
@@ -154,7 +166,11 @@ def build_replay_packet(x):
 # do not change minute-to-minute. A short cache avoids hammering the public API.
 LIVE_WEATHER_CACHE = {}
 LIVE_REGIONAL_CACHE = {"ts": 0, "data": None}
+TERRAIN_CACHE = {}
 LIVE_TTL_SECONDS = WEATHER_CACHE_TTL_SECONDS
+
+def _test_fixtures_enabled() -> bool:
+    return str(os.getenv("PRAHARI_ENABLE_TEST_FIXTURES", "false")).strip().lower() in {"1","true","yes","on"}
 
 def _cache_key_weather(location_id:int) -> str:
     return f"open-meteo:{location_id}"
@@ -211,7 +227,7 @@ def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
     last_error=None
     for attempt in range(max(1, attempts)):
         try:
-            req=UrlRequest(url, headers={'User-Agent':'PRAHARI-SIH26192/10.0'})
+            req=UrlRequest(url, headers={'User-Agent':'PRAHARI/11.0'})
             with urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode('utf-8'))
         except HTTPError as exc:
@@ -226,6 +242,67 @@ def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
             if attempt < attempts-1:
                 time.sleep(0.8 * (attempt+1))
     raise last_error or RuntimeError('Weather provider request failed')
+
+
+def _cache_key_terrain(location_id:int) -> str:
+    return f"open-meteo-elevation:{location_id}"
+
+def fetch_terrain_profile(x, force:bool=False, data_override=None):
+    """Fetch provider DEM elevations and derive a transparent local slope proxy.
+
+    No terrain value is invented when the provider is unavailable. A real cached
+    profile may be reused for up to 30 days because terrain is static.
+    """
+    now=int(time.time())
+    cached=TERRAIN_CACHE.get(x['id'])
+    if not force and cached and now-cached['cached_at'] < 7*86400:
+        return cached['profile']
+    persisted=_load_source_cache(_cache_key_terrain(x['id']))
+    if not force and persisted and now-int(persisted.get('fetched_at') or 0) <= 30*86400:
+        profile=dict(persisted['payload'])
+        profile['state']='STALE' if now-int(persisted.get('fetched_at') or 0) > 7*86400 else profile.get('state','CURRENT')
+        TERRAIN_CACHE[x['id']]={'cached_at':int(persisted.get('fetched_at') or now),'profile':profile}
+        return profile
+
+    lat=float(x['lat']); lon=float(x['lon'])
+    dlat=0.0045
+    dlon=dlat/max(0.25,math.cos(math.radians(lat)))
+    coords=[
+        (lat,lon),(lat+dlat,lon),(lat-dlat,lon),(lat,lon+dlon),(lat,lon-dlon),
+        (lat+dlat,lon+dlon),(lat+dlat,lon-dlon),(lat-dlat,lon+dlon),(lat-dlat,lon-dlon)
+    ]
+    params={'latitude':','.join(f'{a:.6f}' for a,_ in coords),'longitude':','.join(f'{b:.6f}' for _,b in coords)}
+    url='https://api.open-meteo.com/v1/elevation?'+urlencode(params)
+    try:
+        data=data_override if data_override is not None else _fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=2)
+        elevations=data.get('elevation') if isinstance(data,dict) else None
+        if not isinstance(elevations,list) or len(elevations)!=len(coords) or any(v is None for v in elevations):
+            raise ValueError('Elevation provider returned an incomplete neighborhood')
+        elevations=[float(v) for v in elevations]
+        center=elevations[0]
+        slopes=[]
+        for (plat,plon),z in zip(coords[1:],elevations[1:]):
+            dy=(plat-lat)*111320.0
+            dx=(plon-lon)*111320.0*math.cos(math.radians(lat))
+            horizontal=max(1.0,math.hypot(dx,dy))
+            slopes.append(math.degrees(math.atan(abs(z-center)/horizontal)))
+        profile={
+            'state':'CURRENT','source':'Open-Meteo Elevation API','source_url':'https://open-meteo.com/en/docs/elevation-api',
+            'fetched_at':now,'elevation_m':round(center,1),'local_slope_proxy_deg':round(max(slopes),2),
+            'mean_neighbor_slope_deg':round(sum(slopes)/len(slopes),2),'sample_radius_m':500,
+            'sample_count':len(coords)
+        }
+        TERRAIN_CACHE[x['id']]={'cached_at':now,'profile':profile}
+        _persist_source_cache(_cache_key_terrain(x['id']),'Open-Meteo Elevation',profile,None)
+        return profile
+    except Exception as exc:
+        persisted=_load_source_cache(_cache_key_terrain(x['id']))
+        if persisted and now-int(persisted.get('fetched_at') or 0) <= 30*86400:
+            profile=dict(persisted['payload']); profile['state']='STALE'; profile['error']=str(exc)
+            return profile
+        return {'state':'MISSING','source':'Open-Meteo Elevation API','source_url':'https://open-meteo.com/en/docs/elevation-api',
+                'fetched_at':None,'elevation_m':None,'local_slope_proxy_deg':None,'mean_neighbor_slope_deg':None,
+                'sample_radius_m':500,'sample_count':0,'error':str(exc)}
 
 def fetch_live_weather(x, force=False, data_override=None):
     now = int(time.time())
@@ -367,7 +444,7 @@ def fetch_live_weather(x, force=False, data_override=None):
             'rain_forecast_72h_mm': _sum_indices(precip,future_idx[:72]),
             'max_rain_probability_24h': max([float(hval(probs,i,0) or 0) for i in future_idx[:24]] or [0]),
             'forecast': points,
-            'note': 'Current conditions are model-derived. Soil moisture is converted to a wetness proxy for the prototype risk model.'
+            'note': 'Current conditions are model-derived. Soil moisture is converted to a wetness proxy for screening.'
         }
         if data_override is None:
             LIVE_WEATHER_CACHE[x['id']]={'cached_at':now,'packet':packet}
@@ -429,6 +506,8 @@ def enrich_with_live(x, packet):
     d['cumulative_rainfall_7d']=packet.get('cumulative_rainfall_7d_mm')
     d['effective_rainfall_11d']=packet.get('effective_rainfall_11d_mm')
     d['max_hourly_rain_24h']=packet.get('max_hourly_rain_24h_mm')
+    d['rain_forecast_1h_mm']=packet.get('rain_forecast_1h_mm')
+    d['rain_forecast_3h_mm']=packet.get('rain_forecast_3h_mm')
     d['rain_forecast_6h_mm']=packet.get('rain_forecast_6h_mm')
     d['rain_forecast_24h_mm']=packet.get('rain_forecast_24h_mm')
     d['rain_forecast_48h_mm']=packet.get('rain_forecast_48h_mm')
@@ -436,6 +515,18 @@ def enrich_with_live(x, packet):
     d['rain_probability_24h']=packet.get('max_rain_probability_24h')
     d['soil_moisture_m3m3']=packet.get('soil_moisture_m3m3')
     d['month']=datetime.now().month
+
+    if availability=='HISTORICAL_REPLAY' and _test_fixtures_enabled():
+        terrain={'state':'TEST_FIXTURE','source':'automated-test fixture','source_url':None,'fetched_at':packet.get('updated_at'),
+                 'elevation_m':packet.get('elevation_model_m'),'local_slope_proxy_deg':packet.get('terrain_slope_deg'),
+                 'mean_neighbor_slope_deg':packet.get('terrain_slope_deg'),'sample_radius_m':500,'sample_count':9}
+    else:
+        terrain=fetch_terrain_profile(x)
+    d['terrain_state']=terrain.get('state')
+    d['terrain_source']=terrain.get('source')
+    d['elevation']=terrain.get('elevation_m')
+    d['slope']=terrain.get('local_slope_proxy_deg')
+    d['terrain_mean_slope_deg']=terrain.get('mean_neighbor_slope_deg')
 
     try:
         tele=latest_telemetry(x['id']) if 'latest_telemetry' in globals() else None
@@ -462,7 +553,7 @@ def enrich_with_live(x, packet):
         })
     baseline=baseline_assess(vals, tele.get('source') if fresh_tele and tele else None)
     d['assessment_status']=baseline.status
-    d['assessment_kind']='TRANSPARENT_SCREENING_BASELINE'
+    d['assessment_kind']='TRANSPARENT_HILL_SCREEN'
     d['assessment_version']=BASELINE_VERSION
     d['risk_probability']=None
     d['risk_percent']=baseline.index
@@ -473,26 +564,7 @@ def enrich_with_live(x, packet):
     required_count=4; available_count=required_count-len(baseline.missing)
     d['data_completeness_pct']=round(100*available_count/required_count,1)
     d['trend']='UNKNOWN' if baseline.status!='ASSESSED' else ('RISING' if (d.get('rain_forecast_24h_mm') or 0)>=60 else 'WATCH' if baseline.level in ('HIGH','CRITICAL') else 'STABLE')
-
-    # Keep the research ensemble visible as an experimental comparison, never as the primary calibrated probability.
     d['experimental_model']=None
-    if baseline.status=='ASSESSED':
-        try:
-            exp_vals={
-                'rainfall':d['rainfall'],'soil_moisture':d['soil_moisture'],'slope':d['slope'],'elevation':d['elevation'],
-                'historical_risk':d['historical_risk'],'ndvi':d['ndvi'],'antecedent_rainfall_72h':d['antecedent_rainfall_72h'],
-                'cumulative_rainfall_7d':d.get('cumulative_rainfall_7d'),'effective_rainfall_11d':d.get('effective_rainfall_11d'),
-                'rain_forecast_24h':d.get('rain_forecast_24h_mm') or 0,'max_hourly_rain_24h':d.get('max_hourly_rain_24h') or 0,'month':d['month']
-            }
-            exp=ml_predict(exp_vals)
-            d['experimental_model']={
-                'label':'Research ensemble (synthetic/bootstrap training; not field calibrated)',
-                'score_percent':round(float(exp.get('probability',0))*100,1),'level':exp.get('level'),
-                'engine':exp.get('engine'),'provenance':exp.get('provenance'),
-                'model_probabilities':exp.get('model_probabilities',{}),'shap_local':exp.get('shap_local',[])[:6]
-            }
-        except Exception as exc:
-            d['experimental_model']={'available':False,'error':str(exc)}
 
     d['sources']=[
         {
@@ -503,21 +575,23 @@ def enrich_with_live(x, packet):
             'note':packet.get('note')
         },
         {
-            'id':'prototype_terrain','name':DATA_CATALOG['prototype_terrain']['name'],'state':'BASELINE_DEMO',
-            'timestamp':None,'units':{'slope':'deg','elevation':'m','ndvi':'unitless'},
-            'coverage':DATA_CATALOG['prototype_terrain']['coverage'],'spatial_resolution':'point seed attributes',
-            'freshness':'static','origin':'bundled seed data',
-            'note':'Slope/elevation/NDVI/history are prototype context and reduce operational confidence.'
+            'id':'open_meteo_elevation','name':DATA_CATALOG['open_meteo_elevation']['name'],'state':terrain.get('state'),
+            'timestamp':terrain.get('fetched_at'),'units':{'elevation':'m','slope_proxy':'deg'},
+            'coverage':'local 3×3 elevation neighborhood','spatial_resolution':DATA_CATALOG['open_meteo_elevation']['spatial_resolution'],
+            'freshness':'static terrain','origin':DATA_CATALOG['open_meteo_elevation']['origin'],
+            'note':'Local slope proxy derived from provider elevation samples.'
         },
     ]
     if tele:
-        d['sources'].append({'id':'field_telemetry','name':'Field sensor telemetry','state':('CURRENT' if fresh_tele else 'STALE') if tele.get('source')=='REAL_SENSOR' else tele.get('source'),
+        d['sources'].append({'id':'field_telemetry','name':'Field sensor telemetry','state':('CURRENT' if fresh_tele else 'STALE') if tele.get('source')=='REAL_SENSOR' else 'EXCLUDED',
             'timestamp':tele.get('created_at'),'units':'sensor-specific','coverage':tele.get('station_id'),'spatial_resolution':'point sensor',
-            'freshness':'<=30 min considered fresh','origin':tele.get('source'),'note':'Only REAL_SENSOR telemetry influences live precursor escalation.'})
+            'freshness':'<=30 min considered fresh','origin':tele.get('source'),'note':'Only authenticated REAL_SENSOR telemetry affects live escalation.'})
     return d
 
 def locs():
-    return [enrich_with_live(x, build_replay_packet(x)) for x in LOCATIONS]
+    # Registry metadata only. Live hazard state is provided by /api/live/locations.
+    return [{**x,'data_state':'NOT_FETCHED','assessment_status':'NOT_ASSESSED','risk_level':'UNKNOWN',
+             'risk_percent':None,'risk_probability':None,'data_completeness_pct':0,'sources':[]} for x in LOCATIONS]
 
 def _missing_or_cached_packet(x, error_message:str):
     """Return a real cached packet when fresh enough, otherwise explicit MISSING."""
@@ -549,7 +623,7 @@ def _missing_or_cached_packet(x, error_message:str):
         'rain_now_mm':None,'cloud_cover_pct':None,'wind_kmh':None,'wind_gust_kmh':None,
         'soil_moisture_m3m3':None,'soil_moisture_proxy_pct':None,'rainfall_6h_mm':None,
         'rainfall_24h_mm':None,'antecedent_rainfall_72h_mm':None,'cumulative_rainfall_7d_mm':None,
-        'effective_rainfall_11d_mm':None,'max_hourly_rain_24h_mm':None,'rain_forecast_6h_mm':None,
+        'effective_rainfall_11d_mm':None,'max_hourly_rain_24h_mm':None,'rain_forecast_1h_mm':None,'rain_forecast_3h_mm':None,'rain_forecast_6h_mm':None,
         'rain_forecast_24h_mm':None,'rain_forecast_48h_mm':None,'rain_forecast_72h_mm':None,
         'max_rain_probability_24h':None,'forecast':[],
         'note':'Live source unavailable and no sufficiently fresh cached observation exists. No values were fabricated.'
@@ -557,47 +631,59 @@ def _missing_or_cached_packet(x, error_message:str):
 
 def live_locs(force=False, mode='live'):
     if mode == 'replay':
+        if not _test_fixtures_enabled():
+            raise HTTPException(404,'Replay fixtures are disabled')
         return [enrich_with_live(x, build_replay_packet(x)) for x in LOCATIONS]
     now=int(time.time())
     if LIVE_REGIONAL_CACHE['data'] is not None and not force and now-LIVE_REGIONAL_CACHE['ts'] < LIVE_TTL_SECONDS:
         return LIVE_REGIONAL_CACHE['data']
 
-    # Open-Meteo explicitly supports comma-separated coordinates. Fetch all
-    # monitored locations in one request so cloud hosting does not burst eight
-    # separate calls from the same shared outbound IP.
-    params = {
-        'latitude': ','.join(str(x['lat']) for x in LOCATIONS),
-        'longitude': ','.join(str(x['lon']) for x in LOCATIONS),
-        'timezone': 'auto',
-        'current': ','.join([
-            'temperature_2m','relative_humidity_2m','precipitation','rain','cloud_cover',
-            'wind_speed_10m','wind_gusts_10m'
-        ]),
-        'hourly': ','.join([
-            'precipitation','rain','precipitation_probability','temperature_2m',
-            'relative_humidity_2m','soil_moisture_0_to_1cm'
-        ]),
-        'past_hours': 264,
-        'forecast_hours': 72
-    }
-    url='https://api.open-meteo.com/v1/forecast?'+urlencode(params)
     packets={}
-    try:
-        batch=_fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=2)
-        if not isinstance(batch,list) or len(batch)!=len(LOCATIONS):
-            raise ValueError(f'Unexpected Open-Meteo batch response shape: {type(batch).__name__}')
-        for x,item in zip(LOCATIONS,batch):
-            packets[x['id']]=fetch_live_weather(x, force=True, data_override=item)
-    except Exception as exc:
-        err=f'{type(exc).__name__}: {exc}'
-        for x in LOCATIONS:
-            packets[x['id']]=_missing_or_cached_packet(x, err)
+    # Keep requests small as monitoring expands beyond a single region. A provider
+    # failure now degrades only that chunk instead of blanking every monitored area.
+    chunk_size=10
+    for start in range(0,len(LOCATIONS),chunk_size):
+        group=LOCATIONS[start:start+chunk_size]
+        params = {
+            'latitude': ','.join(str(x['lat']) for x in group),
+            'longitude': ','.join(str(x['lon']) for x in group),
+            'timezone': 'auto',
+            'current': ','.join([
+                'temperature_2m','relative_humidity_2m','precipitation','rain','cloud_cover',
+                'wind_speed_10m','wind_gusts_10m'
+            ]),
+            'hourly': ','.join([
+                'precipitation','rain','precipitation_probability','temperature_2m',
+                'relative_humidity_2m','soil_moisture_0_to_1cm'
+            ]),
+            'past_hours': 264,
+            'forecast_hours': 72
+        }
+        url='https://api.open-meteo.com/v1/forecast?'+urlencode(params)
+        try:
+            batch=_fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=2)
+            if len(group)==1 and isinstance(batch,dict):
+                batch=[batch]
+            if not isinstance(batch,list) or len(batch)!=len(group):
+                raise ValueError(f'Unexpected Open-Meteo batch response shape: {type(batch).__name__}')
+            for x,item in zip(group,batch):
+                packets[x['id']]=fetch_live_weather(x, force=True, data_override=item)
+        except Exception as exc:
+            err=f'{type(exc).__name__}: {exc}'
+            for x in group:
+                packets[x['id']]=_missing_or_cached_packet(x, err)
+
+    # Elevation is static and cached; parallel first-load calls keep the dashboard
+    # responsive without substituting local constants when the source is absent.
+    uncached=[x for x in LOCATIONS if x['id'] not in TERRAIN_CACHE]
+    if uncached:
+        with ThreadPoolExecutor(max_workers=min(6,len(uncached))) as pool:
+            list(pool.map(fetch_terrain_profile,uncached))
 
     data=[enrich_with_live(x,packets[x['id']]) for x in LOCATIONS]
     LIVE_REGIONAL_CACHE['ts']=now
     LIVE_REGIONAL_CACHE['data']=data
     return data
-
 
 class PortalLoginRequest(BaseModel):
     portal: Literal['ADMIN','FIELD_OFFICER']
@@ -711,6 +797,22 @@ def init_db():
 
 
 init_db()
+
+def _load_persisted_locations():
+    try:
+        con=db()
+        rows=con.execute("SELECT id,name,state,country,lat,lon,source,source_ref FROM monitored_locations WHERE active=1 ORDER BY id").fetchall()
+        con.close()
+        known={x['id'] for x in LOCATIONS}
+        for row in rows:
+            item=dict(row)
+            if item['id'] not in known:
+                LOCATIONS.append(item); known.add(item['id'])
+    except Exception:
+        # Location persistence must not prevent the API from starting.
+        return
+
+_load_persisted_locations()
 
 
 def clamp(v, lo=0.0, hi=1.0):
@@ -903,7 +1005,7 @@ def satellite_packet(x):
         'pipeline_status':'SCENE_DISCOVERY_IMPLEMENTED','imagery_basemap':'NASA GIBS / Esri imagery when reachable',
         'terrain_basemap':'OpenTopoMap when reachable','analysis_mode':'SENTINEL2_SCENE_QA_PLUS_VISUAL_CONTEXT',
         'risk_level':x.get('risk_level','UNKNOWN'),'risk_percent':x.get('risk_percent'),
-        'terrain_context':{'slope_deg':x.get('slope'),'elevation_m':x.get('elevation'),'ndvi_baseline':x.get('ndvi'),'source_state':'BASELINE_DEMO'},
+        'terrain_context':{'slope_deg':x.get('slope'),'elevation_m':x.get('elevation'),'source_state':x.get('terrain_state','NOT_FETCHED'),'source':x.get('terrain_source')},
         'scene_discovery':{'provider':'Element 84 Earth Search','collection':'sentinel-2-l2a','status':'IMPLEMENTED',
                            'note':'PRAHARI searches real Sentinel-2 L2A acquisitions and identifies recent/reference scene pairs using acquisition date and cloud metadata.'},
         'detection_module':{'name':'Landslide4Sense-compatible post-event segmentation','status':'CHECK_MODEL_STATUS_ENDPOINT',
@@ -988,7 +1090,7 @@ def search_sentinel2_scenes(x:dict, days:int=120, max_cloud:float=45.0, limit:in
     req=UrlRequest(
         EARTH_SEARCH_STAC+'/search',
         data=json.dumps(payload).encode('utf-8'),
-        headers={'Content-Type':'application/json','Accept':'application/geo+json','User-Agent':'PRAHARI-SIH26192/10.0'},
+        headers={'Content-Type':'application/json','Accept':'application/geo+json','User-Agent':'PRAHARI/11.0'},
         method='POST'
     )
     try:
@@ -1037,7 +1139,7 @@ def satellite_architecture():
             'model_status_endpoint':'/api/satellite/model/status',
             'preprocess_status_endpoint':'/api/satellite/preprocess/status'
         },
-        'susceptibility':{'status':'BASELINE_DEMO','note':'Current slope/elevation/NDVI context is seeded prototype data, not authoritative DEM-derived raster analysis.'},
+        'susceptibility':{'status':'SCREENING_ONLY','note':'Terrain context uses provider elevation samples; no validated susceptibility raster is claimed.'},
         'deformation_monitoring':{'status':'ROADMAP','note':'Sentinel-1/InSAR slope-deformation monitoring is intentionally separate from optical post-event detection.'},
         'research_basis':{
             'landslide4sense':'Official benchmark uses 12 Sentinel-2 multispectral bands plus slope and DEM at approximately 10 m pixels.',
@@ -1213,7 +1315,7 @@ def startup_seed():
 
 @app.get("/")
 def root():
-    return {"service":"PRAHARI","status":"ok","version":"10.0.0","mode":"traceable-advisory-decision-support"}
+    return {"service":"PRAHARI","status":"ok","version":"11.0.0","mode":"live-hilly-region-monitoring"}
 
 
 @app.get("/api/system/status")
@@ -1225,7 +1327,7 @@ def status():
         "api":"online",
         "database":"online",
         "database_storage":storage_status(DATABASE_URL, hosted=bool(os.getenv("RENDER"))),
-        "risk_engine": ml_status().get("engine", "transparent-fallback"),
+        "risk_engine":"transparent-screening",
         "alert_engine":"draft-advisory-lifecycle; operator review required",
         "browser_notifications":"frontend-ready",
         "satellite_intelligence":"Sentinel-2 live scene discovery/pairing + optional Landslide4Sense-compatible U-Net adapter; live 14-channel research patch preparation; inference requires verified weights and matching input profile",
@@ -1235,28 +1337,25 @@ def status():
         "satellite_nrt":"NASA GIBS VIIRS NRT with pre-warm local tile cache",
         "unacknowledged_alerts":alert_count,
         "last_sync":int(time.time()),
-        "historical_replay_mode":True,
+        "historical_replay_mode":False,
         "auth_required":AUTH_REQUIRED
     }
 
 
 @app.get("/api/ml/status")
 def machine_learning_status():
-    return ml_status()
-
+    return {
+        "status":"NOT_DEPLOYED",
+        "operational":False,
+        "reason":"No spatially and temporally validated all-hilly-region susceptibility model is deployed."
+    }
 
 @app.get("/api/ml/feature-importance")
 def machine_learning_feature_importance():
-    st = ml_status()
-    fi = st.get("feature_importance") or {}
-    return [
-        {"feature": key, "importance": value}
-        for key, value in sorted(fi.items(), key=lambda item: item[1], reverse=True)
-    ]
+    return []
 
 
 @app.get("/api/locations")
-@app.get("/api/sample-locations")
 def locations():
     return locs()
 
@@ -1276,43 +1375,11 @@ def live_location(location_id:int, force:bool=False, mode:Literal['live','replay
 
 @app.post("/api/live/browser-relay/{location_id}", tags=["System"])
 def browser_relay_live(location_id:int, body:dict, role:str=Depends(resolve_role)):
-    # Read-only prototype fallback. Authentication is still required in deployed
-    # mode, but FIELD_OFFICER is intentionally allowed because this endpoint does
-    # not persist data or issue alerts.
-    if AUTH_REQUIRED and role == 'PUBLIC':
-        raise HTTPException(403,'Authenticated PRAHARI session required')
-    x=next((z for z in LOCATIONS if z['id']==location_id),None)
-    if not x:
-        raise HTTPException(404,'Location not found')
-    if str(body.get('provider') or '').upper() != 'OPEN_METEO' or not isinstance(body.get('payload'),dict):
-        raise HTTPException(400,'Valid OPEN_METEO provider payload required')
-    packet=fetch_live_weather(x, force=True, data_override=body['payload'])
-    result=enrich_with_live(x,packet)
-    result['assessment_limitations']=list(result.get('assessment_limitations') or []) + [
-        'Live weather was fetched directly by the authenticated browser because the hosting provider egress was throttled. The server parsed but did not independently re-fetch this provider response.'
-    ]
-    return result
+    raise HTTPException(410,'Client-relayed weather is disabled; live assessments use server-fetched provider data only')
 
 @app.post("/api/assessments/{location_id}/browser-relay", tags=["Assessments"])
 def record_browser_relay_assessment(location_id:int, body:dict, role:str=Depends(resolve_role)):
-    require_role(role,'OPERATOR')
-    x=next((z for z in LOCATIONS if z['id']==location_id),None)
-    if not x:
-        raise HTTPException(404,'Location not found')
-    if str(body.get('provider') or '').upper() != 'OPEN_METEO' or not isinstance(body.get('payload'),dict):
-        raise HTTPException(400,'Valid OPEN_METEO provider payload required')
-    packet=fetch_live_weather(x, force=True, data_override=body['payload'])
-    result=enrich_with_live(x,packet)
-    result['assessment_limitations']=list(result.get('assessment_limitations') or []) + [
-        'Recorded from an authenticated browser-relayed Open-Meteo response because the hosting provider egress was throttled. This transport fallback should be replaced by server-managed provider access for production warning operations.'
-    ]
-    assessment_id=_save_assessment(location_id,'live-browser-relay',result)
-    draft=None
-    if result.get('assessment_status')=='ASSESSED' and result.get('risk_level') in ('HIGH','CRITICAL'):
-        draft=create_alert(location_id,f"{x['name']}, {x['state']}",result['risk_level'],result.get('risk_percent') or 0,
-                           'assessment-live-browser-relay',dedupe_seconds=300)
-    return {'assessment_id':assessment_id,'assessment':result,'draft_advisory':localized_alert(draft,'en') if draft else None,
-            'note':'Browser-relayed live assessment recorded with explicit transport provenance.'}
+    raise HTTPException(410,'Client-relayed assessments are disabled; record an assessment from the server-fetched live source')
 
 @app.get("/api/live/diagnostics/{location_id}", tags=["System"])
 def live_diagnostics(location_id:int, force:bool=True, role:str=Depends(resolve_role)):
@@ -1382,11 +1449,71 @@ def export_assessment(assessment_id:int, format:Literal['json','csv']='json'):
     w.writerow(['inputs_json',json.dumps(inputs)]); w.writerow(['sources_json',json.dumps(sources)]); w.writerow(['factors_json',json.dumps(export['factors'])]); w.writerow(['limitations_json',json.dumps(export['limitations'])])
     return Response(buf.getvalue(),media_type='text/csv',headers={'Content-Disposition':f'attachment; filename="prahari_assessment_{assessment_id}.csv"'})
 
+class MonitoredLocationCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    state: str = Field(min_length=2, max_length=120)
+    lat: float = Field(ge=6.0, le=38.5)
+    lon: float = Field(ge=67.0, le=98.5)
+    source_ref: Optional[str] = Field(default=None, max_length=160)
+
 @app.get('/api/locations/search')
-def search_locations(q:str=Query('',max_length=80)):
-    needle=q.strip().lower()
-    items=[{'id':x['id'],'name':x['name'],'state':x['state'],'lat':x['lat'],'lon':x['lon']} for x in LOCATIONS if not needle or needle in x['name'].lower() or needle in x['state'].lower()]
-    return items[:20]
+def search_locations(q:str=Query('',min_length=2,max_length=80)):
+    query=q.strip()
+    params={'name':query,'count':10,'language':'en','format':'json','countryCode':'IN'}
+    try:
+        raw=_fetch_json_with_retries('https://geocoding-api.open-meteo.com/v1/search?'+urlencode(params),WEATHER_TIMEOUT_SECONDS,attempts=2)
+    except Exception as exc:
+        raise HTTPException(503,f'Location search is temporarily unavailable: {type(exc).__name__}')
+    existing={(round(float(x['lat']),4),round(float(x['lon']),4)):x['id'] for x in LOCATIONS}
+    out=[]
+    for item in (raw.get('results') or []):
+        if str(item.get('country_code') or '').upper()!='IN':
+            continue
+        lat=item.get('latitude'); lon=item.get('longitude')
+        if lat is None or lon is None: continue
+        state=item.get('admin1') or item.get('admin2') or 'India'
+        out.append({
+            'provider_id':str(item.get('id') or ''),'name':item.get('name') or query,'state':state,'country':'India',
+            'lat':float(lat),'lon':float(lon),'elevation_m':item.get('elevation'),
+            'timezone':item.get('timezone'),'monitored_location_id':existing.get((round(float(lat),4),round(float(lon),4)))
+        })
+    return out
+
+@app.post('/api/locations', status_code=201)
+def add_monitored_location(body:MonitoredLocationCreate, role:str=Depends(resolve_role)):
+    require_role(role,'ADMIN')
+    for x in LOCATIONS:
+        if abs(float(x['lat'])-body.lat)<0.0005 and abs(float(x['lon'])-body.lon)<0.0005:
+            return x
+    location_id=max([1000]+[int(x['id']) for x in LOCATIONS])+1
+    now=int(time.time())
+    item={'id':location_id,'name':body.name.strip(),'state':body.state.strip(),'country':'India',
+          'lat':float(body.lat),'lon':float(body.lon),'source':'OPEN_METEO_GEOCODING','source_ref':body.source_ref}
+    con=db()
+    try:
+        con.execute("INSERT INTO monitored_locations(id,name,state,country,lat,lon,source,source_ref,active,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)",
+                    (location_id,item['name'],item['state'],'India',item['lat'],item['lon'],item['source'],item['source_ref'],now,now))
+        con.commit()
+    finally: con.close()
+    LOCATIONS.append(item)
+    LIVE_REGIONAL_CACHE['data']=None; LIVE_REGIONAL_CACHE['ts']=0
+    return item
+
+@app.delete('/api/locations/{location_id}', status_code=204)
+def remove_monitored_location(location_id:int, role:str=Depends(resolve_role)):
+    require_role(role,'ADMIN')
+    target=next((x for x in LOCATIONS if x['id']==location_id),None)
+    if not target: raise HTTPException(404,'Location not found')
+    if location_id<=1000:
+        raise HTTPException(409,'Curated monitoring points cannot be removed')
+    con=db()
+    try:
+        con.execute("UPDATE monitored_locations SET active=0,updated_at=? WHERE id=?",(int(time.time()),location_id));con.commit()
+    finally: con.close()
+    LOCATIONS[:] = [x for x in LOCATIONS if x['id']!=location_id]
+    LIVE_WEATHER_CACHE.pop(location_id,None); TERRAIN_CACHE.pop(location_id,None)
+    LIVE_REGIONAL_CACHE['data']=None; LIVE_REGIONAL_CACHE['ts']=0
+    return Response(status_code=204)
 
 @app.get("/api/locations/{location_id}")
 def location(location_id:int):
@@ -1400,13 +1527,15 @@ def location(location_id:int):
 def predict(inp: RiskInput):
     values=inp.model_dump(exclude_none=True)
     if inp.method=='experimental_ensemble':
+        if not _test_fixtures_enabled():
+            raise HTTPException(410,'Synthetic/bootstrap research ensemble is disabled for operational use')
         result=risk_score(inp); p=float(result['probability']); level=result['level']
         return {
             'assessment_kind':'EXPERIMENTAL_BOOTSTRAP_ENSEMBLE','calibrated_probability':False,
             'risk_probability':None,'experimental_score_percent':round(p*100,1),'risk_percent':round(p*100,1),'risk_level':level,
             'recommended_action':action_for(level),'model_probabilities':result.get('model_probabilities',{}),'shap_local':result.get('shap_local',[]),
             'engine':result.get('engine'),'model_provenance':result.get('provenance'),
-            'limitations':['Synthetic/bootstrap training; not field-calibrated for Northeast India.','Score must not be described as an operational probability.'],
+            'limitations':['Synthetic/bootstrap training; automated-test use only.','Score is not an operational probability.'],
             'automatic_alert_triggered':False
         }
     base=baseline_assess({
@@ -1441,9 +1570,8 @@ def summary():
         "high_zones":high,
         "active_alerts":unacked,
         "citizen_reports":report_count,
-        "population_exposed_prototype":sum(x.get('population_exposed',0) for x in data if x.get('risk_level') in ('HIGH','CRITICAL')),
         "avg_risk_index":round(sum(float(x['risk_percent']) for x in assessed)/len(assessed),1) if assessed else None,
-        "note":"Risk index is an uncalibrated screening index; prototype exposure totals are not authoritative impact estimates."
+        "note":"Risk index is a transparent screening index; no population exposure total is produced without verified GIS."
     }
 
 
@@ -1908,7 +2036,7 @@ def auth_status(x_prahari_key:Optional[str]=Header(default=None,alias='X-PRAHARI
 
 @app.get('/api/data/sources')
 def data_sources():
-    return {'sources':DATA_CATALOG,'policy':'CURRENT, STALE, MISSING and HISTORICAL_REPLAY states are explicit. Missing data never silently becomes low risk.'}
+    return {'sources':DATA_CATALOG,'policy':'CURRENT, STALE and MISSING source states are explicit. Missing data never silently becomes low risk.'}
 
 @app.get("/api/weather/{location_id}")
 def weather(location_id:int, force:bool=False):
@@ -1960,45 +2088,17 @@ def satellite(location_id:int):
 
 @app.get("/api/forecast-risk/{location_id}")
 def forecast_risk(location_id:int):
-    """Transparent forecast-guidance trajectory, not a calibrated landslide forecast."""
-    base=next((z for z in LOCATIONS if z['id']==location_id),None)
-    if not base: raise HTTPException(404,'Location not found')
-    w=fetch_live_weather(base)
-    if w.get('availability')=='MISSING':
-        return {'location_id':location_id,'available':False,'state':'MISSING','points':[],
-                'note':'Weather source unavailable. PRAHARI does not fabricate a forecast trajectory.'}
-    rain24=w.get('rainfall_24h_mm'); rain72=w.get('antecedent_rainfall_72h_mm'); soil=w.get('soil_moisture_proxy_pct')
-    if any(v is None for v in [rain24,rain72,soil]):
-        return {'location_id':location_id,'available':False,'state':'INCOMPLETE','points':[],
-                'note':'Required weather fields are missing.'}
-    f6=w.get('rain_forecast_6h_mm') or 0; f24=w.get('rain_forecast_24h_mm') or 0; f48=w.get('rain_forecast_48h_mm') or f24; f72=w.get('rain_forecast_72h_mm') or f48
-    scenarios=[('NOW',rain24,0),('+6H',max(0,rain24*.78+f6),f6),('+24H',max(0,rain24*.28+f24),f24),('+48H',max(0,rain24*.12+max(0,f48-f24)),f48),('+72H',max(0,max(0,f72-f48)),f72)]
-    points=[]
-    for label,rain,added in scenarios:
-        res=baseline_assess({'rainfall_24h':rain,'antecedent_rainfall_72h':rain72+added*.55,'cumulative_rainfall_7d':(w.get('cumulative_rainfall_7d_mm') or rain72*1.7)+added*.7,
-                            'soil_moisture':min(100,soil+added*.08),'slope':base['slope'],'max_hourly_rain_24h':w.get('max_hourly_rain_24h_mm')})
-        points.append({'horizon':label,'risk_index':res.index,'risk_level':res.level,'assessment_status':res.status,'rainfall_24h_mm':round(rain,1),'forecast_added_mm':round(added,1)})
-    return {'location_id':location_id,'location':f"{base['name']}, {base['state']}",'available':True,'state':w.get('availability'),
-            'source':w.get('source'),'points':points,'assessment_kind':'TRANSPARENT_SCREENING_TRAJECTORY',
-            'note':'Scenario guidance derived from forecast rainfall and generic screening rules. Not a calibrated probability or official warning forecast.'}
+    _loc(location_id)
+    raise HTTPException(410,'Synthetic risk trajectories are disabled; use the live flash-flood screen with configured catchment thresholds')
 
 @app.get("/api/research/model-card")
 def research_model_card():
-    st=ml_status()
     return {
-        'project':'PRAHARI',
-        'engine':st.get('engine'),
-        'model_type':st.get('model_type'),
-        'features':st.get('features',[]),
-        'weights':st.get('weights',{}),
-        'monotone_constraints':st.get('monotone_constraints',{}),
-        'local_explainability':st.get('local_explainability'),
-        'validation':st.get('validation'),
-        'bootstrap_metrics':st.get('bootstrap_metrics',{}),
-        'provenance':st.get('provenance'),
-        'research_basis':st.get('research_basis',[]),
-        'production_path':st.get('production_path'),
-        'warning':'Bootstrap metrics are not real-world landslide accuracy.'
+        "project":"PRAHARI",
+        "status":"NOT_OPERATIONAL",
+        "model_type":None,
+        "validation":None,
+        "warning":"A flood-susceptibility model will only be exposed after real inventory training, spatial/temporal holdout validation and calibration."
     }
 
 
@@ -2009,28 +2109,17 @@ def satellite_scenes():
 
 @app.get("/api/routes")
 def routes():
-    result=[]; by={x['id']:x for x in locs()}
-    for r in ROUTES:
-        x=by[r['location_id']]
-        result.append({**r,"risk_index":x.get('risk_percent'),"location":x['name'],"data_status":"BASELINE_DEMO",
-                       "source":"PRAHARI prototype route inventory","safety_claim":False,
-                       "warning":"Routing context is demonstrative only. Verify official road closure and hazard data before operational use."})
-    return result
-
+    return []
 
 @app.get("/api/infrastructure")
 def infrastructure():
-    by={x['id']:x for x in locs()}; out=[]
-    for i in INFRA:
-        x=by[i['location_id']]
-        out.append({**i,"location":x['name'],"risk_level":x.get('risk_level'),"risk_index":x.get('risk_percent'),
-                    "data_status":"BASELINE_DEMO","source":"PRAHARI prototype asset inventory","verified_intersection":False,
-                    "warning":"Asset records are seed data; no authoritative GIS intersection is claimed."})
-    return out
+    return []
 
 
 @app.get("/api/scenarios")
 def scenarios():
+    if not _test_fixtures_enabled():
+        raise HTTPException(404,'Test fixtures are disabled')
     return [
         {"name":"Cloudburst / saturated slope","values":{"rainfall":225,"antecedent_rainfall_72h":480,"cumulative_rainfall_7d":910,"effective_rainfall_11d":760,"rain_forecast_24h":95,"max_hourly_rain_24h":34,"soil_moisture":93,"slope":52,"elevation":1650,"historical_risk":0.86,"ndvi":0.55,"month":7}},
         {"name":"Severe monsoon watch","values":{"rainfall":165,"antecedent_rainfall_72h":390,"cumulative_rainfall_7d":720,"effective_rainfall_11d":640,"rain_forecast_24h":82,"max_hourly_rain_24h":27,"soil_moisture":84,"slope":43,"elevation":1350,"historical_risk":0.72,"ndvi":0.63,"month":8}},
@@ -2176,16 +2265,7 @@ SEVERITY_W = {'LOW':.2,'MODERATE':.45,'HIGH':.75,'CRITICAL':1.0}
 
 # Prototype assembly points and a tiny offline routing graph. These are not
 # official shelters; they demonstrate how verified emergency GIS would plug in.
-SHELTERS = {
-    1:[{'id':'G-A','name':'Prototype Assembly Point G-A','lat':27.344,'lon':88.606,'capacity':900}, {'id':'G-B','name':'Prototype Assembly Point G-B','lat':27.318,'lon':88.625,'capacity':700}],
-    2:[{'id':'A-A','name':'Prototype Assembly Point A-A','lat':23.742,'lon':92.710,'capacity':850}, {'id':'A-B','name':'Prototype Assembly Point A-B','lat':23.713,'lon':92.729,'capacity':650}],
-    3:[{'id':'K-A','name':'Prototype Assembly Point K-A','lat':25.690,'lon':94.100,'capacity':700}],
-    4:[{'id':'S-A','name':'Prototype Assembly Point S-A','lat':25.590,'lon':91.879,'capacity':900}],
-    5:[{'id':'I-A','name':'Prototype Assembly Point I-A','lat':27.098,'lon':93.590,'capacity':850}],
-    6:[{'id':'M-A','name':'Prototype Assembly Point M-A','lat':24.830,'lon':93.924,'capacity':800}],
-    7:[{'id':'D-A','name':'Prototype Assembly Point D-A','lat':25.200,'lon':93.012,'capacity':650}],
-    8:[{'id':'U-A','name':'Prototype Assembly Point U-A','lat':24.327,'lon':92.054,'capacity':600}],
-}
+SHELTERS = {}
 
 def _haversine(lat1,lon1,lat2,lon2):
     r=6371.0
@@ -2230,28 +2310,13 @@ def impact_assessment_value(location_id, hazard_percent=None):
     if hazard_percent is None and current:
         hazard_percent=current.get('risk_percent')
     comm=community_signal_value(location_id)
-    assets=[i for i in INFRA if i['location_id']==location_id]
-    if hazard_percent is None:
-        return {
-            'location_id':location_id,'available':False,'hazard_index':None,'impact_score':None,'priority':'UNKNOWN',
-            'community_signal':comm['score'],'assets_at_risk':len(assets),'population_exposed':x.get('population_exposed',0),
-            'data_status':'INCOMPLETE','asset_source':'PRAHARI prototype seed inventory',
-            'interpretation':'Impact scoring is unavailable until a traceable risk assessment exists. Bundled assets/population are prototype context, not an authoritative exposure inventory.'
-        }
-    asset_weights={'Hospital':1.0,'School':.85,'Bridge':.8,'Village':.75}
-    asset_score=min(100,sum(asset_weights.get(a['type'],.5)*22 for a in assets))
-    pop_score=min(100,x.get('population_exposed',0)/150.0)
-    road=next((r for r in ROUTES if r['location_id']==location_id),None)
-    road_score=90 if road and road['status']=='RESTRICTED' else (62 if road and road['status']=='CAUTION' else 28)
-    vulnerability=round(.42*asset_score+.33*road_score+.25*comm['score'],1)
-    impact=round(.55*float(hazard_percent)+.25*pop_score+.20*vulnerability,1)
-    priority='EMERGENCY' if impact>=80 else ('VERY HIGH' if impact>=65 else ('HIGH' if impact>=50 else ('WATCH' if impact>=35 else 'ROUTINE')))
+    # No population, road or asset score is fabricated. Exposure becomes
+    # available only when an authoritative inventory is connected.
     return {
-        'location_id':location_id,'available':True,'hazard_index':round(float(hazard_percent),1),
-        'exposure_score':round(pop_score,1),'vulnerability_score':vulnerability,'community_signal':comm['score'],
-        'impact_score':impact,'priority':priority,'population_exposed':x.get('population_exposed',0),'assets_at_risk':len(assets),
-        'asset_source':'PRAHARI prototype seed inventory','data_status':'BASELINE_DEMO_EXPOSURE',
-        'interpretation':'Prototype decision-support fusion only. Asset/population exposure is not an authoritative intersection or official loss estimate.'
+        'location_id':location_id,'available':False,'hazard_index':round(float(hazard_percent),1) if hazard_percent is not None else None,
+        'impact_score':None,'priority':'UNKNOWN','community_signal':comm['score'],
+        'assets_at_risk':None,'population_exposed':None,'data_status':'NO_VERIFIED_EXPOSURE_DATA',
+        'asset_source':None,'interpretation':'Verified exposure GIS is not connected for this monitoring point.'
     }
 
 def _route_plan(location_id, hazard_percent):
@@ -2308,8 +2373,8 @@ def response_plan(location_id:int):
     return {
         'location_id':location_id,'location':f"{x['name']}, {x['state']}",'assessment_state':current.get('assessment_status'),
         'impact':imp,'routing_suggestion':route,'recommended_action':action,
-        'route_policy':'Prototype routing suggestion only; it is never labelled safe without verified closure, hazard and shelter datasets.',
-        'checklist':['Review source freshness and missing inputs','Verify field/community evidence','Escalate draft advisory to a qualified reviewer','Confirm official road/shelter information before any movement recommendation','Track acknowledgement and field outcome'],
+        'route_policy':'No route is generated until verified road-closure and shelter GIS are connected.',
+        'checklist':[],
         'ew4all_pillars':{'risk_knowledge':'GIS + traceable assessment','monitoring_forecasting':'weather + optional real telemetry','warning_communication':'reviewed advisory lifecycle','preparedness_response':'operator checklist + audit history'},
         'human_decision_gate':{'required':True,'policy':'PRAHARI provides decision support; competent geological/emergency authorities authorize public warnings, evacuation and road closure.'}
     }
@@ -2317,6 +2382,8 @@ def response_plan(location_id:int):
 @app.post('/api/iot/telemetry', tags=['Edge & IoT'])
 def ingest_telemetry(t:TelemetryInput, role:str=Depends(resolve_role)):
     require_role(role,'OPERATOR')
+    if t.source!='REAL_SENSOR' and not _test_fixtures_enabled():
+        raise HTTPException(422,'Only REAL_SENSOR telemetry is accepted outside automated tests')
     x=_loc(t.location_id); now=int(time.time()); con=db(); cur=con.cursor()
     tid=insert_row(cur, 'INSERT INTO telemetry(location_id,station_id,rainfall_intensity,soil_moisture,tilt_deg,vibration_g,pore_pressure_kpa,displacement_mm,battery_pct,quality,source,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                 (t.location_id,t.station_id,t.rainfall_intensity,t.soil_moisture,t.tilt_deg,t.vibration_g,t.pore_pressure_kpa,t.displacement_mm,t.battery_pct,t.quality,t.source,now))
@@ -2335,12 +2402,13 @@ def ingest_telemetry(t:TelemetryInput, role:str=Depends(resolve_role)):
         draft=create_alert(x['id'],f"{x['name']}, {x['state']}",'CRITICAL',None,'edge-real-sensor-screen',dedupe_seconds=300)
 
     weather=fetch_live_weather(x)
+    terrain=fetch_terrain_profile(x)
     baseline=baseline_assess({
         'rainfall_24h':weather.get('rainfall_24h_mm'),
         'antecedent_rainfall_72h':weather.get('antecedent_rainfall_72h_mm'),
         'cumulative_rainfall_7d':weather.get('cumulative_rainfall_7d_mm'),
         'soil_moisture':t.soil_moisture if t.soil_moisture is not None else weather.get('soil_moisture_proxy_pct'),
-        'slope':x.get('slope'),'max_hourly_rain_24h':weather.get('max_hourly_rain_24h_mm'),
+        'slope':terrain.get('local_slope_proxy_deg'),'max_hourly_rain_24h':weather.get('max_hourly_rain_24h_mm'),
         'rainfall_intensity':t.rainfall_intensity,'tilt_deg':t.tilt_deg,'vibration_g':t.vibration_g,
         'pore_pressure_kpa':t.pore_pressure_kpa,'displacement_mm':t.displacement_mm,'telemetry_quality':t.quality,
     }, t.source)
@@ -2360,17 +2428,19 @@ def ingest_telemetry(t:TelemetryInput, role:str=Depends(resolve_role)):
 @app.get('/api/iot/telemetry/latest', tags=['Edge & IoT'])
 def latest_iot(location_id:int=Query(...)):
     _loc(location_id); row=latest_telemetry(location_id)
-    return {'location_id':location_id,'available':bool(row),'telemetry':row,'note':'REAL_SENSOR is live field telemetry; SIMULATED_HACKATHON is explicitly demo data.'}
+    return {'location_id':location_id,'available':bool(row),'telemetry':row,'note':'Only authenticated REAL_SENSOR telemetry is accepted for operational monitoring.'}
 
 @app.post('/api/iot/demo/{location_id}', tags=['Edge & IoT'])
 def demo_iot(location_id:int, role:str=Depends(resolve_role)):
     require_role(role,'OPERATOR')
+    if not _test_fixtures_enabled():
+        raise HTTPException(404,'Test fixtures are disabled')
     x=_loc(location_id)
     # Explicit synthetic demonstration packet. It is stored as SIMULATED_HACKATHON and is excluded from live escalation.
     replay=build_replay_packet(x)
     rain=float(replay.get('rainfall_24h_mm') or 0)
     wet=float(replay.get('soil_moisture_proxy_pct') or 0)
-    severity=max(0.0,min(1.0,(rain/200.0 + wet/100.0 + x['slope']/60.0)/3.0))
+    severity=max(0.0,min(1.0,(rain/200.0 + wet/100.0 + float(replay.get('terrain_slope_deg') or 0)/60.0)/3.0))
     t=TelemetryInput(location_id=location_id,station_id=f"DEMO-{location_id:02d}",rainfall_intensity=round(max(2,rain/8),1),soil_moisture=wet,
         tilt_deg=round(.4+severity*2.7,2),vibration_g=round(.05+severity*.38,3),pore_pressure_kpa=round(18+severity*68,1),
         displacement_mm=round(.7+severity*10.5,2),battery_pct=94,quality=.96,source='SIMULATED_HACKATHON')
@@ -2432,9 +2502,10 @@ def _tile_xy(lon,lat,z):
     x=int((lon+180)/360*n); y=int((1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*n)
     return x,y
 
-def _ner_tiles(min_zoom=4,max_zoom=6):
-    # Deliberately limited to low zooms for fast presentation-grade coverage.
-    west,south,east,north=87.0,21.0,98.5,31.2; out=[]
+def _india_tiles(min_zoom=4,max_zoom=6):
+    # Low-zoom cache covers India so western, central, northeastern and peninsular
+    # hill systems share the same satellite context.
+    west,south,east,north=68.0,6.0,98.5,38.0; out=[]
     for z in range(min_zoom,max_zoom+1):
         x1,y2=_tile_xy(west,south,z); x2,y1=_tile_xy(east,north,z)
         for x in range(min(x1,x2),max(x1,x2)+1):
@@ -2445,7 +2516,7 @@ def _fetch_tile(date,z,y,x,timeout=4):
     path=_tile_path(date,z,y,x)
     if path.exists() and path.stat().st_size>500: return path,False
     path.parent.mkdir(parents=True,exist_ok=True)
-    req=Request(_nasa_url(date,z,y,x),headers={'User-Agent':'PRAHARI-SIH26192/10.0'})
+    req=Request(_nasa_url(date,z,y,x),headers={'User-Agent':'PRAHARI/11.0'})
     with urlopen(req,timeout=timeout) as resp:
         data=resp.read(2_000_000)
         ctype=(resp.headers.get('Content-Type') or '').lower()
@@ -2457,7 +2528,7 @@ def _cached_dates():
     return sorted([d.name for d in TILE_CACHE.iterdir() if d.is_dir() and len(d.name)==10], reverse=True) if TILE_CACHE.exists() else []
 
 def _cache_status(max_zoom=6):
-    active=_active_sat_date(); tiles=_ner_tiles(4,max_zoom); dates=[active]+[d for d in _cached_dates() if d!=active]
+    active=_active_sat_date(); tiles=_india_tiles(4,max_zoom); dates=[active]+[d for d in _cached_dates() if d!=active]
     best_date=active; best_cached=0
     for date in dates:
         n=sum(1 for z,y,x in tiles if _tile_path(date,z,y,x).exists())
@@ -2470,7 +2541,7 @@ def satellite_cache_status(max_zoom:int=6):
 
 @app.post('/api/satellite/cache/warm', tags=['Satellite / Offline'])
 def satellite_cache_warm(max_zoom:int=6):
-    max_zoom=max(4,min(7,max_zoom)); date=_active_sat_date(); tiles=_ner_tiles(4,max_zoom); failures=[]; downloaded=0; start=time.time()
+    max_zoom=max(4,min(7,max_zoom)); date=_active_sat_date(); tiles=_india_tiles(4,max_zoom); failures=[]; downloaded=0; start=time.time()
     def one(t):
         z,y,x=t
         try: return t,_fetch_tile(date,z,y,x,timeout=5)[1],None
@@ -2521,19 +2592,27 @@ def research_evidence_matrix():
 
 @app.get('/api/system/health', tags=['System'])
 def system_health_v8():
-    st=ml_status(); cache=_cache_status(6); con=db(); tele=con.execute('SELECT COUNT(*) n FROM telemetry').fetchone()['n']; con.close()
-    return {'project':'PRAHARI','api_version':'10.0.0','status':'READY','ml_engine':st.get('engine'),'ml_loaded':st.get('model_loaded'),
-            'weather':'LIVE_OR_TRANSPARENT_FALLBACK','satellite':{'offline_lite':'READY','local_nasa_cache_pct':cache['ready_pct'],'nasa_direct':'OPTIONAL'},
-            'edge_iot':{'ingest_api':'READY','telemetry_records':tele},'people_centred_ews':'READY','impact_based_warning':'READY','offline_response_graph':'READY'}
+    cache=_cache_status(6)
+    con=db(); tele=con.execute('SELECT COUNT(*) n FROM telemetry').fetchone()['n']; con.close()
+    return {
+        'project':'PRAHARI','api_version':'11.0.0','status':'READY',
+        'ml_engine':'NOT_DEPLOYED','ml_loaded':False,
+        'weather':'LIVE_WITH_TRANSPARENT_STALE_OR_MISSING_STATES',
+        'terrain':'OPEN_METEO_ELEVATION',
+        'satellite':{'scene_discovery':'READY','local_nasa_cache_pct':cache['ready_pct']},
+        'edge_iot':{'ingest_api':'READY','telemetry_records':tele,'operational_source':'REAL_SENSOR_ONLY'},
+        'exposure_gis':'NOT_CONNECTED','routing_gis':'NOT_CONNECTED'
+    }
 
 @app.get('/api/research/data-readiness', tags=['Research'])
 def research_data_readiness():
-    return {'implemented_dynamic':['peak 1h rainfall','24h rainfall','72h antecedent rainfall','7-day cumulative rainfall','11-day effective rainfall','24/48/72h forecast trajectory','model/field soil wetness','seasonality'],
-            'implemented_context':['slope','elevation','historical susceptibility','NDVI baseline','citizen precursor evidence','exposure/infrastructure'],
-            'sensor_ready':['rainfall intensity','soil moisture','tilt','vibration','pore pressure','displacement','battery/quality'],
-            'research_synthesis':['rainfall-regime classification','input-sensitivity uncertainty envelope','IoT deformation precursor trend','alert feedback metrics','human decision gate'],
-            'next_real_datasets':['lithology','lineament density','distance to faults/roads/drainage','TWI','SPI','STI','curvature','LULC','soil depth/texture','Sentinel-1 InSAR deformation','field geotechnical cohesion/friction'],
-            'principle':'Do not fabricate missing geospatial layers. Add them only when verified datasets are available.'}
+    return {
+        'live_dynamic':['1/3/6h forecast rainfall','24h rainfall','72h antecedent rainfall','model soil moisture','provider elevation/slope proxy'],
+        'optional_real_sensor':['water level','rainfall intensity','soil moisture','tilt','vibration','pore pressure','displacement'],
+        'available_context':['Sentinel-2 scene discovery','field reports','assessment/advisory audit trail'],
+        'not_connected':['watershed-mean gauge/radar/satellite rainfall fusion','verified flood inventory','hydrologic routing','2D inundation','exposure GIS','spatially validated susceptibility ML','conformal uncertainty'],
+        'policy':'Unavailable scientific inputs remain unavailable rather than being filled with demo values.'
+    }
 
 @app.get('/api/geofence/check', tags=['People-centred EWS'])
 def geofence_check(lat:float=Query(...,ge=-90,le=90), lon:float=Query(...,ge=-180,le=180), radius_km:float=Query(25,ge=1,le=100)):

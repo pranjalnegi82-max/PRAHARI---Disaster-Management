@@ -15,7 +15,7 @@ const RISK = {
 };
 const NAV = ['Flash Floods', 'Overview', 'Risk Map', 'Reports & Alerts', 'Data & Settings'];
 const NAV_ICONS = { 'Flash Floods':'water', 'Overview':'home', 'Risk Map':'map', 'Reports & Alerts':'report', 'Data & Settings':'settings' };
-const STATE_LABEL = { CURRENT: 'Current', STALE: 'Cached / stale', MISSING: 'Missing', HISTORICAL_REPLAY: 'Historical replay', BASELINE_DEMO: 'Prototype baseline' };
+const STATE_LABEL = { CURRENT: 'Current', STALE: 'Cached / stale', MISSING: 'Missing', NOT_FETCHED: 'Not fetched' };
 const RISK_COLOR = { LOW:'#2f855a', MODERATE:'#b7791f', HIGH:'#c05621', CRITICAL:'#c53030', UNKNOWN:'#718096' };
 
 const fmt = (v, digits=1) => v === null || v === undefined || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(digits);
@@ -26,38 +26,10 @@ const fmtTime = (v) => {
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
 };
 
-async function browserDirectLiveFallback(locations) {
-  if (!Array.isArray(locations) || !locations.length) return locations || [];
-  const params = new URLSearchParams({
-    latitude: locations.map(x=>x.lat).join(','),
-    longitude: locations.map(x=>x.lon).join(','),
-    timezone: 'auto',
-    current: 'temperature_2m,relative_humidity_2m,precipitation,rain,cloud_cover,wind_speed_10m,wind_gusts_10m',
-    hourly: 'precipitation,rain,precipitation_probability,temperature_2m,relative_humidity_2m,soil_moisture_0_to_1cm',
-    past_hours: '264',
-    forecast_hours: '72',
-  });
-  const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
-  if (!response.ok) throw new Error(`Direct Open-Meteo fallback failed: ${response.status} ${response.statusText}`);
-  const raw = await response.json();
-  const payloads = Array.isArray(raw) ? raw : [raw];
-  if (payloads.length !== locations.length) throw new Error('Direct Open-Meteo fallback returned an unexpected location count.');
-  const assessed = await Promise.all(locations.map(async (loc,i)=>{
-    const parsed = await post(`/api/live/browser-relay/${loc.id}`, {provider:'OPEN_METEO', payload:payloads[i]});
-    return {...parsed, __browser_provider_payload:payloads[i]};
-  }));
-  return assessed;
-}
-
-function needsBrowserWeatherFallback(data) {
-  return Array.isArray(data) && data.length > 0 &&
-    data.every(x=>x.data_state==='MISSING') &&
-    data.some(x=>String(x.weather_error||'').includes('429'));
-}
 
 function Badge({children, tone='neutral'}) { return <span className={`badge badge-${tone}`}>{children}</span>; }
 function StateBadge({state}) {
-  const tone = state === 'CURRENT' ? 'good' : state === 'STALE' || state === 'HISTORICAL_REPLAY' ? 'warn' : state === 'MISSING' ? 'danger' : 'neutral';
+  const tone = state === 'CURRENT' ? 'good' : state === 'STALE' ? 'warn' : state === 'MISSING' ? 'danger' : 'neutral';
   return <Badge tone={tone}>{STATE_LABEL[state] || state || 'Unknown'}</Badge>;
 }
 function RiskBadge({level='UNKNOWN'}) {
@@ -115,7 +87,7 @@ function RiskMapView({locations, selected, onSelect, basemap='street', compact=f
     ? {url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr:'Tiles © Esri — visual basemap only'}
     : {url:'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attr:'© OpenStreetMap contributors'};
   return <div className={`map-wrap ${compact ? 'map-compact' : ''}`}>
-    <MapContainer center={[25.6, 92.7]} zoom={5} scrollWheelZoom={!compact} className="map-canvas">
+    <MapContainer center={[22.8, 79.0]} zoom={4} scrollWheelZoom={!compact} className="map-canvas">
       <TileLayer url={tiles.url} attribution={tiles.attr}/>
       <MapFocus location={selected}/>
       {locations.map(loc => <CircleMarker key={loc.id} center={[loc.lat, loc.lon]} radius={loc.id===selected?.id ? 12 : 9}
@@ -152,7 +124,7 @@ function PortalLogin({onAuthenticated,initialPortal='ADMIN'}) {
     <header className="login-brand"><span className="brand-symbol">P</span><div><strong>PRAHARI</strong><small>Predictive Risk Assessment, Hazard Alert & Response Intelligence</small></div></header>
     <main className="login-card-wrap">
       <section className="login-intro">
-        <span className="hero-kicker">SIH26192 · Hilly regions of India</span>
+        <span className="hero-kicker">Hilly regions of India</span>
         <h1>One platform.<br/>Two operational portals.</h1>
         <p>Role-separated access keeps command decisions and field enrollment clear, traceable and appropriately restricted.</p>
         <div className="login-safety"><Icon name="shield" size={18}/><span>PRAHARI is advisory decision support. Official warnings remain with authorized agencies.</span></div>
@@ -166,13 +138,13 @@ function PortalLogin({onAuthenticated,initialPortal='ADMIN'}) {
           <div className="portal-login-heading"><h2>{portal==='ADMIN'?'Admin sign in':'Field officer sign in'}</h2><p>{portal==='ADMIN'?'Access the PRAHARI command and alert-management workspace.':'Your assigned posting is enforced by the backend after sign in.'}</p></div>
           {portal==='FIELD_OFFICER'&&<label className="field"><span>Officer code</span><input value={officerCode} onChange={e=>setOfficerCode(e.target.value)} placeholder="e.g. FO-GTK-01" autoComplete="username" required/></label>}
           <label className="field"><span>{portal==='ADMIN'?'Admin access key':'Officer access key'}</span><input type="password" value={accessKey} onChange={e=>setAccessKey(e.target.value)} placeholder={portal==='ADMIN'?'Enter admin key':'Enter field-officer key'} autoComplete="current-password"/></label>
-          {portal==='ADMIN'&&<p className="fine login-hint">For local development only, if no admin key is configured and authentication is open, this field may be left blank.</p>}
+          
           {error&&<div className="notice notice-error"><strong>Sign in failed.</strong><span>{error}</span></div>}
           <button className="btn btn-primary portal-submit" disabled={busy}>{busy?'Signing in…':portal==='ADMIN'?'Open Admin Portal':'Open Field Officer Portal'}</button>
         </form>
       </section>
     </main>
-    <footer className="login-footer">PRAHARI · Role-separated operational access · SIH26192<span className="login-photo-credit">Yumthang Valley, Sikkim · Photo by <a href="https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0" target="_blank" rel="noreferrer">nur alam / Unsplash</a></span></footer>
+    <footer className="login-footer">PRAHARI · Operational access</footer>
   </div>;
 }
 
@@ -192,16 +164,11 @@ function FieldOfficerPortal({session,onLogout}) {
     setError(''); setRefreshing(true);
     try{
       const [a,p,l,r,al,h]=await Promise.all([
-        get('/api/auth/status'), get('/api/field/profile'), get('/api/live/locations?mode=live'),
+        get('/api/auth/status'), get('/api/field/profile'), get('/api/live/locations'),
         get('/api/reports'), get('/api/alerts'), get('/api/field/households')
       ]);
       if(a.current_role!=='FIELD_OFFICER') throw new Error('This session is not authorized for the Field Officer Portal.');
-      let liveLocations=l;
-      if (needsBrowserWeatherFallback(liveLocations)) {
-        try { liveLocations=await browserDirectLiveFallback(liveLocations); }
-        catch (fallbackError) { console.warn('PRAHARI browser weather fallback unavailable:', fallbackError); }
-      }
-      setAuth(a); setProfile({...p,posting_location_id:p.location_id}); setLocations(liveLocations); setReports(r); setAlerts(al); setHouseholds(h);
+      setAuth(a); setProfile({...p,posting_location_id:p.location_id}); setLocations(l); setReports(r); setAlerts(al); setHouseholds(h);
     }catch(e){setError(e.message);}finally{setLoading(false);setRefreshing(false);}
   }
   useEffect(()=>{loadAll();},[]);
@@ -222,7 +189,7 @@ function FieldOfficerPortal({session,onLogout}) {
       <div className="sidebar-spacer"/>
       <div className="field-officer-card"><span className="user-avatar">F</span><div><strong>{profile?.name||'Field Officer'}</strong><small>{profile?.officer_code||'Posting restricted'}</small></div></div>
       <button className="btn field-logout" onClick={onLogout}><Icon name="logout" size={16}/> Sign out</button>
-      <p className="sidebar-note">Field portal · Posting-scoped civilian registration</p>
+      
     </aside>
     <div className="app-frame">
       <header className="topbar field-topbar">
@@ -294,7 +261,6 @@ function PortalApp(){
 
 function AdminPortal({session,onLogout}) {
   const [view, setView] = useState('Flash Floods');
-  const [mode, setMode] = useState('live');
   const [locations, setLocations] = useState([]);
   const [selectedId, setSelectedId] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -313,14 +279,11 @@ function AdminPortal({session,onLogout}) {
   async function loadLocations(force=false) {
     setError(''); setRefreshing(true);
     try {
-      let data = await get(`/api/live/locations?mode=${mode}&force=${force}`);
-      if (mode==='live' && needsBrowserWeatherFallback(data)) {
-        try { data = await browserDirectLiveFallback(data); }
-        catch (fallbackError) { console.warn('PRAHARI browser weather fallback unavailable:', fallbackError); }
-      }
+      const data = await get(`/api/live/locations?force=${force}`);
       setLocations(data);
       if (!data.some(x=>x.id===selectedId) && data[0]) setSelectedId(data[0].id);
-    } catch (e) { setError(e.message); }
+      return data;
+    } catch (e) { setError(e.message); return []; }
     finally { setLoading(false); setRefreshing(false); }
   }
   async function loadSideData() {
@@ -331,16 +294,14 @@ function AdminPortal({session,onLogout}) {
     if (tasks[3].status==='fulfilled') setSources(tasks[3].value);
     if (tasks[4].status==='fulfilled') setAuth(tasks[4].value);
   }
-  useEffect(()=>{ loadLocations(); loadSideData(); }, [mode]);
-  useEffect(()=>{ setAssessment(null); setAssessmentId(null); }, [selectedId, mode]);
+  useEffect(()=>{ loadLocations(); loadSideData(); }, []);
+  useEffect(()=>{ setAssessment(null); setAssessmentId(null); }, [selectedId]);
 
   async function runAssessment() {
     if (!selected) return;
     setRefreshing(true); setError('');
     try {
-      const out = mode==='live' && selected?.__browser_provider_payload
-        ? await post(`/api/assessments/${selected.id}/browser-relay`, {provider:'OPEN_METEO', payload:selected.__browser_provider_payload})
-        : await post(`/api/assessments/${selected.id}?mode=${mode}&force=true`, {});
+      const out = await post(`/api/assessments/${selected.id}?force=true`, {});
       setAssessment(out.assessment); setAssessmentId(out.assessment_id);
       await loadLocations(true); await loadSideData();
     } catch(e) { setError(e.message); }
@@ -365,17 +326,13 @@ function AdminPortal({session,onLogout}) {
         <span className={`status-dot ${selected?.data_state==='CURRENT'?'online':'degraded'}`}/>
         <div><strong>{selected?.data_state==='CURRENT'?'Live context':'Data status'}</strong><small>{STATE_LABEL[selected?.data_state] || 'Waiting for source'}</small></div>
       </div>
-      <p className="sidebar-note">Decision-support prototype · SIH26192</p>
+
     </aside>
 
     <div className="app-frame">
       <header className="topbar">
-        <LocationSelector locations={locations} selectedId={selectedId} onSelect={setSelectedId} compact/>
+        <LocationSelector locations={locations} selectedId={selectedId} onSelect={setSelectedId} onAdded={async newId=>{await loadLocations(true);setSelectedId(newId)}} compact/>
         <div className="top-actions">
-          <div className="mode-toggle compact" role="group" aria-label="Data mode">
-            <button className={mode==='live'?'active':''} onClick={()=>setMode('live')}>Live</button>
-            <button className={mode==='replay'?'active':''} onClick={()=>setMode('replay')}>Replay</button>
-          </div>
           <button className="icon-btn" onClick={()=>loadLocations(true)} disabled={refreshing} title="Refresh data" aria-label="Refresh data"><Icon name="refresh" size={18}/></button>
           <button className="icon-btn" onClick={()=>setView('Reports & Alerts')} title="Reports and alerts" aria-label="Reports and alerts"><Icon name="bell" size={18}/>{attention>0&&<span className="icon-count">{attention}</span>}</button>
           <div className="portal-identity" title="Admin Command Center"><span className="user-avatar">A</span><div><strong>Admin</strong><small>Command Center</small></div></div>
@@ -386,8 +343,8 @@ function AdminPortal({session,onLogout}) {
       <main className="workspace">
         {error && <ErrorBox message={error} onRetry={()=>loadLocations(true)}/>} 
         {loading ? <Loading/> : <>
-          {view==='Flash Floods' && <FlashFloodPanel key={`${selectedId}-${mode}`} selected={selected} mode={mode} onRefreshAlerts={loadSideData}/>}
-          {view==='Overview' && <Overview location={activeAssessment} locations={locations} alerts={unresolved} reports={reports} assessmentId={assessmentId} onAssess={runAssessment} onNavigate={setView} refreshing={refreshing} mode={mode}/>} 
+          {view==='Flash Floods' && <FlashFloodPanel key={selectedId} selected={selected} onRefreshAlerts={loadSideData}/>}
+          {view==='Overview' && <Overview location={activeAssessment} locations={locations} alerts={unresolved} reports={reports} assessmentId={assessmentId} onAssess={runAssessment} onNavigate={setView} refreshing={refreshing}/>} 
           {view==='Risk Map' && <RiskMapPage locations={locations} selected={selected} onSelect={loc=>setSelectedId(loc.id)} onAssess={runAssessment} assessment={activeAssessment}/>} 
           {view==='Reports & Alerts' && <ReportsAlerts reports={reports} alerts={alerts} selected={selected} locations={locations} auth={auth} onRefresh={loadSideData}/>} 
           {view==='Data & Settings' && <DataSettings system={system} sources={sources} auth={auth} selected={selected} locations={locations} session={session} onLogout={onLogout} onAuthRefresh={loadSideData}/>} 
@@ -398,25 +355,62 @@ function AdminPortal({session,onLogout}) {
   </div>;
 }
 
-function LocationSelector({locations, selectedId, onSelect, compact=false}) {
-  const selected = locations.find(x=>x.id===selectedId);
-  const [query,setQuery]=useState(selected ? `${selected.name}, ${selected.state}` : '');
-  useEffect(()=>{ if(selected) setQuery(`${selected.name}, ${selected.state}`); },[selectedId, locations.length]);
-  const matches=locations.filter(x=>`${x.name} ${x.state}`.toLowerCase().includes(query.toLowerCase().trim())).slice(0,8);
+function LocationSelector({locations, selectedId, onSelect, onAdded, compact=false}) {
+  const selected=locations.find(x=>x.id===selectedId);
+  const selectedLabel=selected?`${selected.name}, ${selected.state}`:'';
+  const [query,setQuery]=useState(selectedLabel);
+  const [remote,setRemote]=useState([]);
+  const [searching,setSearching]=useState(false);
+  const [adding,setAdding]=useState('');
+
+  useEffect(()=>{if(selected)setQuery(selectedLabel);},[selectedId,selectedLabel]);
+
+  useEffect(()=>{
+    const q=query.trim();
+    if(q.length<2 || q===selectedLabel){setRemote([]);setSearching(false);return;}
+    const timer=setTimeout(async()=>{
+      setSearching(true);
+      try{setRemote(await get(`/api/locations/search?q=${encodeURIComponent(q)}`));}
+      catch{setRemote([]);}
+      finally{setSearching(false);}
+    },320);
+    return()=>clearTimeout(timer);
+  },[query,selectedLabel]);
+
+  const local=locations.filter(x=>`${x.name} ${x.state}`.toLowerCase().includes(query.toLowerCase().trim())).slice(0,6);
+  const remoteOnly=remote.filter(r=>!local.some(x=>Math.abs(x.lat-r.lat)<0.0005&&Math.abs(x.lon-r.lon)<0.0005)).slice(0,6);
+  const open=query.trim().length>=2 && query!==selectedLabel;
+
+  async function chooseRemote(r){
+    if(r.monitored_location_id){onSelect(r.monitored_location_id);setQuery(`${r.name}, ${r.state}`);return;}
+    setAdding(r.provider_id||`${r.lat},${r.lon}`);
+    try{
+      const added=await post('/api/locations',{name:r.name,state:r.state,lat:r.lat,lon:r.lon,source_ref:r.provider_id||null});
+      await onAdded?.(added.id);
+      setQuery(`${added.name}, ${added.state}`);
+      setRemote([]);
+    }finally{setAdding('');}
+  }
+
   return <div className={`location-search ${compact?'location-search-compact':''}`}>
-    <label className="field location-select"><span className={compact?'sr-only':''}>Search / select area</span><span className="search-icon"><Icon name="search" size={17}/></span><input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search location in Northeast India…" aria-controls="location-results"/></label>
-    {query && selected && query !== `${selected.name}, ${selected.state}` && <div className="location-results" id="location-results">{matches.length?matches.map(x=><button key={x.id} onClick={()=>{onSelect(x.id);setQuery(`${x.name}, ${x.state}`)}}><strong>{x.name}</strong><span>{x.state}</span></button>):<span>No configured area matches. General geocoding is not connected yet.</span>}</div>}
+    <label className="field location-select"><span className={compact?'sr-only':''}>Location</span><span className="search-icon"><Icon name="search" size={17}/></span><input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search hilly region in India…" aria-controls="location-results" autoComplete="off"/></label>
+    {open&&<div className="location-results" id="location-results">
+      {local.map(x=><button key={`local-${x.id}`} onClick={()=>{onSelect(x.id);setQuery(`${x.name}, ${x.state}`)}}><strong>{x.name}</strong><span>{x.state}</span><b>MONITORED</b></button>)}
+      {remoteOnly.map(x=><button key={`remote-${x.provider_id||x.lat+'-'+x.lon}`} disabled={!!adding} onClick={()=>chooseRemote(x)}><strong>{x.name}</strong><span>{x.state}{x.elevation_m!=null?` · ${Math.round(x.elevation_m)} m`:''}</span><b>{x.monitored_location_id?'OPEN':adding===(x.provider_id||`${x.lat},${x.lon}`)?'ADDING…':'ADD'}</b></button>)}
+      {searching&&<span className="location-search-status">Searching…</span>}
+      {!searching&&local.length===0&&remoteOnly.length===0&&<span className="location-search-status">No results</span>}
+    </div>}
   </div>;
 }
 
-function Overview({location, locations, alerts, reports, assessmentId, onAssess, onNavigate, refreshing, mode}) {
+function Overview({location, locations, alerts, reports, assessmentId, onAssess, onNavigate, refreshing}) {
   if (!location) return <Empty title="No area available"/>;
   const factors = location.factors || [];
   const stale = location.data_state === 'STALE';
   const missing = location.assessment_status === 'INSUFFICIENT_DATA' || location.data_state === 'MISSING';
   const newReports = reports.filter(r=>r.status==='NEW').length;
   const riskLevel = location.risk_level || 'UNKNOWN';
-  const dataDetail = mode==='replay' ? 'Historical replay' : (location.data_state==='CURRENT' ? 'Live / latest' : STATE_LABEL[location.data_state] || 'Unknown');
+  const dataDetail = location.data_state==='CURRENT' ? 'Live / latest' : STATE_LABEL[location.data_state] || 'Unknown';
 
   return <div className="overview-page">
     <section className="overview-hero" aria-labelledby="overview-title">
@@ -426,12 +420,12 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
         <h1 id="overview-title">Stay Ahead.<br/>Stay Safer.</h1>
         <p>Multi-source flash flood screening, supporting landslide assessment, field reporting and reviewed advisories.</p>
         <div className="hero-actions">
-          <button className="btn btn-hero" onClick={()=>onNavigate('Risk Map')}><Icon name="map" size={18}/> View landslide map</button>
+          <button className="btn btn-hero" onClick={()=>onNavigate('Risk Map')}><Icon name="map" size={18}/> Open risk map</button>
           <button className="btn btn-hero-secondary" onClick={()=>onNavigate('Reports & Alerts')}><Icon name="report" size={18}/> Report incident</button>
         </div>
       </div>
       <div className="hero-risk-card">
-        <div className="hero-risk-top"><span>Landslide screening</span><StateBadge state={location.data_state}/></div>
+        <div className="hero-risk-top"><span>Hill-hazard screening</span><StateBadge state={location.data_state}/></div>
         <RiskBadge level={riskLevel}/>
         <h2>{location.name}, {location.state}</h2>
         <div className="hero-risk-index"><strong>{location.risk_percent == null ? '—' : fmt(location.risk_percent,0)}</strong><span>/100<br/><small>screening index</small></span></div>
@@ -440,8 +434,6 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
       </div>
     </section>
 
-    <p className="terrain-credit">Yumthang Valley, Sikkim · Photo by <a href="https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0" target="_blank" rel="noreferrer">nur alam / Unsplash</a></p>
-
     <section className="summary-strip" aria-label="Current observation summary">
       <StatCard icon="alert" label="Current risk" value={RISK[riskLevel]?.label || 'Unknown'} unit="" detail={location.risk_percent == null ? 'Insufficient data' : `${fmt(location.risk_percent,0)}/100 screening index`} tone={riskLevel==='LOW'?'green':riskLevel==='MODERATE'?'amber':riskLevel==='UNKNOWN'?'blue':'red'}/>
       <StatCard icon="rain" label="Rainfall · 24 h" value={fmt(location.rainfall)} unit=" mm" detail={`72 h: ${fmt(location.antecedent_rainfall_72h)} mm`} tone="blue"/>
@@ -449,12 +441,11 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
       <StatCard icon="data" label="Data status" value={dataDetail} unit="" detail={`${fmt(location.data_completeness_pct,0)}% complete`} tone={location.data_state==='CURRENT'?'green':'amber'}/>
     </section>
 
-    {location.weather_transport==='BROWSER_DIRECT_RELAY' && <div className="notice notice-warn"><strong>Direct live-data transport active.</strong><span>Open-Meteo was fetched by this browser because the cloud backend was rate-limited. Values are live provider data, but the server did not independently re-fetch them.</span></div>}
     {stale && <div className="notice notice-warn"><strong>Cached observations in use.</strong><span>Review source timestamps before operational decisions.</span></div>}
     {missing && <div className="notice notice-error"><strong>Assessment incomplete.</strong><span>Missing data is not converted into low risk. Missing: {(location.missing_inputs||[]).join(', ') || 'required weather fields'}.</span></div>}
 
     <section className="quick-section">
-      <div className="section-heading"><div><span className="eyebrow">Quick access</span><h2>What do you need to do?</h2></div><span className="section-meta">{alerts.length} open alerts · {newReports} new reports</span></div>
+      <div className="section-heading"><div><span className="eyebrow">Quick access</span><h2>Operations</h2></div><span className="section-meta">{alerts.length} open alerts · {newReports} new reports</span></div>
       <div className="quick-grid">
         <QuickAction icon="map" title="Risk Map" detail="Explore areas and risk context" onClick={()=>onNavigate('Risk Map')} tone="blue"/>
         <QuickAction icon="report" title="Citizen Reports" detail="Submit or review field evidence" onClick={()=>onNavigate('Reports & Alerts')} tone="purple"/>
@@ -484,10 +475,8 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
       </Panel>
     </div>
 
-    <details className="disclosure overview-disclosure"><summary>Technical details & limitations</summary><div className="disclosure-body">
-      <p><strong>Terrain context:</strong> bundled prototype point attributes until authoritative DEM-derived features are integrated.</p>
+    <details className="disclosure overview-disclosure"><summary>Data limits</summary><div className="disclosure-body">
       {(location.assessment_limitations||[]).map((x,i)=><p key={i}>{x}</p>)}
-      {location.experimental_model && <p><strong>Experimental ensemble:</strong> visible for research comparison only; synthetic/bootstrap training and not field-calibrated.</p>}
     </div></details>
   </div>;
 }
@@ -496,66 +485,6 @@ function Meta({label,value}) { return <div className="meta"><span>{label}</span>
 function Metric({label,value,unit}) { return <div className="metric"><span>{label}</span><strong>{value}<small>{unit}</small></strong></div>; }
 function Attention({count,label,action}) { return <button className="attention" onClick={action}><span className={count?'count count-hot':'count'}>{count}</span><span>{label}</span><span aria-hidden="true">→</span></button>; }
 
-function summarizeSentinelScene(item) {
-  const props=item?.properties||{};
-  const links=item?.links||[];
-  const link=(rel)=>links.find(x=>x.rel===rel && x.href)?.href||null;
-  const assets=item?.assets||{};
-  const asset=(...names)=>{for(const name of names){if(assets?.[name]?.href)return assets[name].href;}return null;};
-  return {
-    id:item?.id,
-    datetime:props.datetime,
-    cloud_cover_pct:props['eo:cloud_cover'],
-    platform:props.platform,
-    thumbnail_url:link('thumbnail'),
-    stac_url:link('self'),
-    bbox:item?.bbox,
-    assets:{visual:asset('visual'),red:asset('red','B04'),nir:asset('nir','nir08','B08'),swir16:asset('swir16','B11'),swir22:asset('swir22','B12'),scl:asset('scl','SCL')}
-  };
-}
-
-function chooseSentinelPair(scenes) {
-  const valid=(scenes||[]).filter(x=>x.datetime).sort((a,b)=>new Date(b.datetime)-new Date(a.datetime));
-  if(!valid.length)return null;
-  const recent=valid[0], rdt=new Date(recent.datetime);
-  const candidates=valid.slice(1).filter(x=>(rdt-new Date(x.datetime))/86400000>=10);
-  if(!candidates.length)return {recent,reference:null,days_between:null,status:'REFERENCE_SCENE_NOT_FOUND'};
-  candidates.sort((a,b)=>{
-    const ca=a.cloud_cover_pct??999, cb=b.cloud_cover_pct??999;
-    if(ca!==cb)return ca-cb;
-    return Math.abs((rdt-new Date(a.datetime))/86400000-30)-Math.abs((rdt-new Date(b.datetime))/86400000-30);
-  });
-  const reference=candidates[0];
-  return {recent,reference,days_between:Math.round((rdt-new Date(reference.datetime))/86400000),status:'PAIR_READY'};
-}
-
-async function browserSentinel2Search(location,{days=120,maxCloud=45,limit=12,signal}={}) {
-  const end=new Date(), start=new Date(end.getTime()-days*86400000);
-  const pad=.15;
-  const body={
-    collections:['sentinel-2-l2a'],
-    bbox:[location.lon-pad,location.lat-pad,location.lon+pad,location.lat+pad],
-    datetime:`${start.toISOString()}/${end.toISOString()}`,
-    query:{'eo:cloud_cover':{lte:maxCloud}},
-    limit
-  };
-  const response=await fetch('https://earth-search.aws.element84.com/v1/search',{
-    method:'POST',headers:{'Content-Type':'application/json','Accept':'application/geo+json'},body:JSON.stringify(body),
-    signal:signal?AbortSignal.any([signal,AbortSignal.timeout(20000)]):AbortSignal.timeout(20000)
-  });
-  if(!response.ok)throw new Error(`Earth Search returned ${response.status}`);
-  const raw=await response.json();
-  const scenes=(raw.features||[]).map(summarizeSentinelScene).sort((a,b)=>new Date(b.datetime)-new Date(a.datetime));
-  const pair=chooseSentinelPair(scenes);
-  return {
-    status:scenes.length?'AVAILABLE':'NO_SCENES',provider:'Element 84 Earth Search',collection:'sentinel-2-l2a',
-    location_id:location.id,location:`${location.name}, ${location.state}`,searched_at:Date.now()/1000,
-    search_days:days,max_cloud_pct:maxCloud,scene_count:scenes.length,scenes,pair,
-    analysis_status:pair?.status==='PAIR_READY'?'SCENE_PAIR_READY':'SCENE_DISCOVERY_ONLY',
-    segmentation_status:'CHECK_MODEL_STATUS_ENDPOINT',transport:'BROWSER_DIRECT_STAC',
-    note:'Real Sentinel-2 scene metadata fetched directly from Earth Search. Scene pairing is quality control, not a landslide detection result.'
-  };
-}
 
 function SatelliteSceneCard({scene,label}) {
   if(!scene)return <div className="sat-scene-card sat-scene-empty"><strong>{label}</strong><span>No suitable scene found.</span></div>;
@@ -569,24 +498,39 @@ function SatelliteSceneCard({scene,label}) {
 function RiskMapPage({locations,selected,onSelect,onAssess,assessment}) {
   const [basemap,setBasemap]=useState('street');
   const [history,setHistory]=useState([]);
-  const [forecast,setForecast]=useState(null);
-  useEffect(()=>{ if (!selected) return; Promise.allSettled([get(`/api/assessments/${selected.id}/history`),get(`/api/forecast-risk/${selected.id}`)]).then(([h,f])=>{if(h.status==='fulfilled')setHistory(h.value);if(f.status==='fulfilled')setForecast(f.value);}); },[selected?.id]);
+  useEffect(()=>{if(!selected)return;get(`/api/assessments/${selected.id}/history`).then(setHistory).catch(()=>setHistory([]));},[selected?.id]);
 
   return <div className="risk-map-page">
-    <div className="map-toolbar"><div><h1>{basemap==='intelligence'?'Satellite Intelligence':'Risk Map'}</h1><p>{basemap==='intelligence'?'Real Sentinel-2 scene review is separated from weather-risk screening and visual basemaps.':'Weather risk, field evidence and satellite context remain explicitly separated.'}</p></div><div className="segmented"><button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button><button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite view</button><button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence')}>Sentinel-2 intelligence</button></div></div>
+    <div className="map-toolbar">
+      <div><h1>{basemap==='intelligence'?'Satellite Intelligence':'Risk Map'}</h1><p>{selected?`${selected.name}, ${selected.state}`:'Hilly regions of India'}</p></div>
+      <div className="segmented">
+        <button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button>
+        <button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite</button>
+        <button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence')}>Sentinel-2</button>
+      </div>
+    </div>
 
     {basemap==='intelligence'
-      ? <SatelliteIntelligence key={selected?.id} selected={selected} searchScenes={browserSentinel2Search} SceneCard={SatelliteSceneCard}/>
+      ? <SatelliteIntelligence key={selected?.id} selected={selected} SceneCard={SatelliteSceneCard}/>
       : <div className="map-layout">
           <RiskMapView locations={locations} selected={selected} onSelect={onSelect} basemap={basemap}/>
           <aside className="map-detail">
-            <Panel title={selected?`${selected.name}, ${selected.state}`:'Select an area'} actions={selected&&<button className="btn btn-primary" onClick={onAssess}>Record assessment</button>}>
-              {selected && <><div className="detail-risk"><RiskBadge level={assessment?.risk_level || selected.risk_level}/><strong>{assessment?.risk_percent == null ? 'Index unavailable' : `${fmt(assessment.risk_percent,0)} / 100`}</strong></div>
-              <StateBadge state={assessment?.data_state || selected.data_state}/>
-              <dl className="kv"><dt>24 h rain</dt><dd>{fmt(assessment?.rainfall ?? selected.rainfall)} mm</dd><dt>72 h antecedent rain</dt><dd>{fmt(assessment?.antecedent_rainfall_72h ?? selected.antecedent_rainfall_72h)} mm</dd><dt>Soil wetness</dt><dd>{fmt(assessment?.soil_moisture ?? selected.soil_moisture)}%</dd><dt>Slope context</dt><dd>{fmt(selected.slope)}° <Badge>prototype</Badge></dd></dl></>}
+            <Panel title={selected?`${selected.name}, ${selected.state}`:'Select an area'} actions={selected&&<button className="btn btn-primary" onClick={onAssess}>Record</button>}>
+              {selected&&<>
+                <div className="detail-risk"><RiskBadge level={assessment?.risk_level||selected.risk_level}/><strong>{(assessment?.risk_percent??selected.risk_percent)==null?'Index unavailable':`${fmt(assessment?.risk_percent??selected.risk_percent,0)} / 100`}</strong></div>
+                <StateBadge state={assessment?.data_state||selected.data_state}/>
+                <dl className="kv">
+                  <dt>24 h rain</dt><dd>{fmt(assessment?.rainfall??selected.rainfall)} mm</dd>
+                  <dt>72 h rain</dt><dd>{fmt(assessment?.antecedent_rainfall_72h??selected.antecedent_rainfall_72h)} mm</dd>
+                  <dt>Soil wetness</dt><dd>{fmt(assessment?.soil_moisture??selected.soil_moisture)}%</dd>
+                  <dt>Local slope proxy</dt><dd>{fmt(selected.slope)}°</dd>
+                  <dt>Terrain source</dt><dd>{selected.terrain_source||'Unavailable'}</dd>
+                </dl>
+              </>}
             </Panel>
-            <details className="disclosure" open><summary>Assessment history</summary><div className="disclosure-body history-list">{history.length?history.slice(0,8).map(h=><div key={h.id}><RiskBadge level={h.risk_level}/><span>{h.mode}</span><span>{fmtTime(h.created_at)}</span></div>):<p className="muted">No recorded assessments yet.</p>}</div></details>
-            <details className="disclosure"><summary>Forecast guidance</summary><div className="disclosure-body">{forecast?.available ? <div className="forecast-list">{forecast.points.map(p=><div key={p.horizon}><strong>{p.horizon}</strong><RiskBadge level={p.risk_level}/><span>{p.risk_index ?? '—'}/100</span></div>)}</div>:<p className="muted">{forecast?.note || 'Forecast guidance unavailable.'}</p>}<p className="fine">Screening trajectory only; not a calibrated probability forecast.</p></div></details>
+            <details className="disclosure" open><summary>Assessment history</summary><div className="disclosure-body history-list">
+              {history.length?history.slice(0,8).map(h=><div key={h.id}><RiskBadge level={h.risk_level}/><span>{fmtTime(h.created_at)}</span></div>):<p className="muted">No recorded assessments.</p>}
+            </div></details>
           </aside>
         </div>}
   </div>;
@@ -732,7 +676,7 @@ function AlertsPane({alerts,auth,locations,onRefresh}) {
   async function loadDeliveries(a){const rows=await get(`/api/alerts/${a.id}/deliveries`);setDeliveryByAlert(m=>({...m,[a.id]:rows}));}
   async function showDeliveries(a){setError('');setNotice('');setBusy(`${a.id}-details`);try{await loadDeliveries(a);}catch(e){setError(e.message);}finally{setBusy(null);}}
   async function refreshDelivery(a){setError('');setNotice('');setBusy(`${a.id}-refresh`);try{const out=await post(`/api/alerts/${a.id}/deliveries/refresh`,{});const errors=(out.deliveries||[]).filter(r=>r?.refresh_error).map(r=>r.refresh_error);if(errors.length)setError(`Could not refresh some delivery statuses: ${[...new Set(errors)].join(' ')}`);else setNotice('Delivery statuses refreshed.');await loadDeliveries(a);await onRefresh();}catch(e){setError(e.message);}finally{setBusy(null);}}
-  function nextActions(a){const s=a.lifecycle_status||'DRAFT'; if(s==='DRAFT')return['REVIEWED','RESOLVED'];if(s==='REVIEWED')return isAdmin?['RESOLVED']:['ISSUED','RESOLVED'];if(s==='ISSUED')return['ACKNOWLEDGED','RESOLVED'];if(s==='ACKNOWLEDGED')return['RESOLVED'];return[];}
+  function nextActions(a){const s=a.lifecycle_status||'DRAFT'; if(s==='DRAFT')return['REVIEWED','RESOLVED'];if(s==='REVIEWED')return['ISSUED','RESOLVED'];if(s==='ISSUED')return['ACKNOWLEDGED','RESOLVED'];if(s==='ACKNOWLEDGED')return['RESOLVED'];return[];}
   return <Panel title="Advisory lifecycle" subtitle="DRAFT → REVIEWED → ISSUED → ACKNOWLEDGED → RESOLVED. External SMS delivery requires an explicit admin action.">
     {error&&<div className="notice notice-error" role="alert">{error}</div>}
     {notice&&<div className="notice notice-warn" role="status">{notice}</div>}
@@ -753,49 +697,97 @@ function AlertsPane({alerts,auth,locations,onRefresh}) {
   </Panel>;
 }
 
-function DataSettings({system,sources,auth,selected,locations,session,onLogout,onAuthRefresh}) {
-  const [channels,setChannels]=useState(null); const [satellite,setSatellite]=useState(null); const [model,setModel]=useState(null); const [infra,setInfra]=useState([]); const [routes,setRoutes]=useState([]);
-  const [recipients,setRecipients]=useState([]); const [recipientError,setRecipientError]=useState(''); const [recipientMsg,setRecipientMsg]=useState('');
+function DataSettings({system,sources,auth,selected,locations,session,onLogout}) {
+  const [channels,setChannels]=useState(null);
+  const [recipients,setRecipients]=useState([]);
+  const [recipientError,setRecipientError]=useState('');
+  const [recipientMsg,setRecipientMsg]=useState('');
   const [recipientForm,setRecipientForm]=useState({name:'',phone_e164:'+91',location_id:selected?.id||'',language:'en',sms_enabled:true,consent_confirmed:false});
   const isAdmin=['ADMIN','DEV_OPERATOR'].includes(auth?.current_role);
+
   async function loadSettings(){
-    const tasks=await Promise.allSettled([get('/api/notification/channels'),selected?get(`/api/satellite/${selected.id}`):Promise.resolve(null),get('/api/research/model-card'),get('/api/infrastructure'),get('/api/routes'),get('/api/notification/recipients')]);
-    const [c,s,m,i,r,n]=tasks;if(c.status==='fulfilled')setChannels(c.value);if(s.status==='fulfilled')setSatellite(s.value);if(m.status==='fulfilled')setModel(m.value);if(i.status==='fulfilled')setInfra(i.value);if(r.status==='fulfilled')setRoutes(r.value);if(n.status==='fulfilled'){setRecipients(n.value);setRecipientError('');}else setRecipientError(n.reason?.message||'Admin key required to manage notification recipients.');
+    const tasks=await Promise.allSettled([get('/api/notification/channels'),get('/api/notification/recipients')]);
+    if(tasks[0].status==='fulfilled')setChannels(tasks[0].value);
+    if(tasks[1].status==='fulfilled'){setRecipients(tasks[1].value);setRecipientError('');}
+    else setRecipientError(tasks[1].reason?.message||'Recipient registry unavailable.');
   }
-  useEffect(()=>{loadSettings();},[selected?.id,auth?.current_role]);
+  useEffect(()=>{loadSettings();},[auth?.current_role]);
   useEffect(()=>{setRecipientForm(f=>({...f,location_id:selected?.id||''}));},[selected?.id]);
-  async function addRecipient(e){e.preventDefault();setRecipientMsg('');setRecipientError('');try{const payload={...recipientForm,location_id:recipientForm.location_id===''?null:Number(recipientForm.location_id)};await post('/api/notification/recipients',payload);setRecipientMsg('SMS recipient enrolled. Only explicitly opted-in contacts will receive alerts.');setRecipientForm(f=>({...f,name:'',phone_e164:'+91',consent_confirmed:false}));await loadSettings();}catch(err){setRecipientError(err.message);}}
-  async function revokeRecipient(id){if(!window.confirm('Revoke this recipient from future PRAHARI SMS alerts?'))return;setRecipientError('');try{await patch(`/api/notification/recipients/${id}`,{consent_status:'REVOKED'});await loadSettings();}catch(err){setRecipientError(err.message);}}
-  const sourceList=sources?.sources ? Object.entries(sources.sources) : [];
-  return <div>{system?.database_storage?.warning&&<div className="notice notice-warn"><strong>Database storage needs attention.</strong><span>{system.database_storage.warning}</span></div>}<div className="page-title"><div><h1>Data & Settings</h1><p>Source provenance, system health, authorization and external alert delivery.</p></div></div>
+
+  async function addRecipient(e){
+    e.preventDefault();setRecipientMsg('');setRecipientError('');
+    try{
+      const payload={...recipientForm,location_id:recipientForm.location_id===''?null:Number(recipientForm.location_id)};
+      await post('/api/notification/recipients',payload);
+      setRecipientMsg('Recipient added.');
+      setRecipientForm(f=>({...f,name:'',phone_e164:'+91',consent_confirmed:false}));
+      await loadSettings();
+    }catch(err){setRecipientError(err.message);}
+  }
+
+  async function revokeRecipient(id){
+    if(!window.confirm('Remove this recipient from future SMS alerts?'))return;
+    setRecipientError('');
+    try{await patch('/api/notification/recipients/'+id,{consent_status:'REVOKED'});await loadSettings();}
+    catch(err){setRecipientError(err.message);}
+  }
+
+  const sourceList=sources?.sources?Object.entries(sources.sources):[];
+  const healthEntries=system?Object.entries(system).filter(([k])=>['version','database_storage','live_data_provider','risk_engine','auth_required','unacknowledged_alerts'].includes(k)):[];
+  return <div className="settings-page">
+    <div className="page-title"><div><h1>Data & Settings</h1><p>Live sources, system status and alert recipients</p></div></div>
+
     <div className="settings-grid">
-      <Panel title="Data sources" subtitle="Origin and operational status are shown explicitly."><div className="source-table" role="table">{sourceList.map(([id,s])=><div className="source-row" key={id}><div><strong>{s.name}</strong><span>{s.kind}</span></div><StateBadge state={s.status}/><div><span>{s.coverage}</span><small>{s.spatial_resolution}</small></div><a href={s.origin?.startsWith('http')?s.origin:undefined} target="_blank" rel="noreferrer">{s.origin}</a></div>)}</div><p className="fine">{sources?.policy}</p></Panel>
-      <Panel title="System health"><div className="status-grid">{system?Object.entries(system).filter(([k])=>!['last_sync'].includes(k)).slice(0,14).map(([k,v])=><div key={k}><span>{k.replaceAll('_',' ')}</span><strong>{k==='database_storage'?`${v.backend} · ${v.storage.replaceAll('_',' ')}`:typeof v==='boolean'?(v?'Yes':'No'):String(v)}</strong></div>):<Loading/>}</div></Panel>
-      <Panel title="Admin portal session" subtitle={auth?.auth_required?'Protected admin session. Credentials remain in this browser session only.':'Local development mode is open; enable authentication before shared deployment.'}><div className="session-card"><span className="session-role"><Icon name="shield" size={18}/><strong>{auth?.current_role||session?.portal||'ADMIN'}</strong></span><div><span>Portal</span><strong>Administration & Command Center</strong></div><div><span>Scope</span><strong>All monitored areas</strong></div><button className="btn btn-secondary small" onClick={onLogout}><Icon name="logout" size={15}/> Sign out</button></div></Panel>
-      <Panel title="Notification channels" subtitle="Configuration status; delivery is confirmed by Twilio receipts."><div className="channel-list">{channels?Object.entries(channels).filter(([k])=>!['policy','status_callback','active_recipients'].includes(k)).map(([k,v])=><span key={k}><strong>{k}</strong>: {v.status} · {v.delivery}{v.opted_in_recipients!=null?` · ${v.opted_in_recipients} opted in`:''}</span>):<Loading/>}</div>{channels&&<div className="notification-summary"><span>Active recipients <strong>{channels.active_recipients??0}</strong></span><span>Status callback <strong>{channels.status_callback?'Configured':'Not configured'}</strong></span></div>}{!!channels?.sms?.issues?.length&&<div className="notice notice-warn"><strong>SMS setup needed</strong><ul>{channels.sms.issues.map(issue=><li key={issue}>{issue}</li>)}</ul><span>For Render, update the API service → Environment, then save and redeploy.</span></div>}<p className="fine">{channels?.policy}</p></Panel>
+      <Panel title="Data sources">
+        <div className="source-table" role="table">{sourceList.map(([id,s])=><div className="source-row" key={id}>
+          <div><strong>{s.name}</strong><span>{s.kind}</span></div>
+          <StateBadge state={s.status}/>
+          <div><span>{s.coverage}</span><small>{s.spatial_resolution}</small></div>
+          {s.origin?.startsWith('http')?<a href={s.origin} target="_blank" rel="noreferrer">Source ↗</a>:<span>{s.origin}</span>}
+        </div>)}</div>
+      </Panel>
+
+      <Panel title="System">
+        <div className="status-grid">{healthEntries.length?healthEntries.map(([k,v])=><div key={k}>
+          <span>{k.replaceAll('_',' ')}</span>
+          <strong>{k==='database_storage'&&v?(v.backend+' · '+String(v.storage).replaceAll('_',' ')):typeof v==='boolean'?(v?'Yes':'No'):String(v??'—')}</strong>
+        </div>):<Loading/>}</div>
+      </Panel>
+
+      <Panel title="Alert delivery">
+        <div className="channel-list">{channels?Object.entries(channels).filter(([k])=>!['policy','status_callback','active_recipients'].includes(k)).map(([k,v])=><span key={k}><strong>{k.toUpperCase()}</strong> {v.status}{v.opted_in_recipients!=null?(' · '+v.opted_in_recipients+' recipients'):''}</span>):<Loading/>}</div>
+        {channels&&<div className="notification-summary"><span>Active recipients <strong>{channels.active_recipients??0}</strong></span><span>Delivery callback <strong>{channels.status_callback?'Connected':'Not connected'}</strong></span></div>}
+        {!!channels?.sms?.issues?.length&&<div className="notice notice-warn"><strong>SMS unavailable</strong><span>{channels.sms.issues.join(' ')}</span></div>}
+      </Panel>
+
+      <Panel title="Session">
+        <div className="session-card"><span className="session-role"><Icon name="shield" size={18}/><strong>{auth?.current_role||session?.portal||'ADMIN'}</strong></span><div><span>Scope</span><strong>All monitored areas</strong></div><button className="btn btn-secondary small" onClick={onLogout}><Icon name="logout" size={15}/> Sign out</button></div>
+      </Panel>
     </div>
 
-    <Panel title="Civilian SMS registry" subtitle="Field officers register opted-in civilians by posting; admins retain oversight and emergency correction access." className="recipient-panel">
-      {!isAdmin&&<div className="notice notice-warn">Field officers should use Reports & Alerts → Civilian enrollment. Admin access is required for the full cross-area registry.</div>}
-      {recipientError&&<div className="notice notice-error">{recipientError}</div>}{recipientMsg&&<div className="notice notice-warn">{recipientMsg}</div>}
+    <Panel title="SMS recipients" className="recipient-panel">
+      {recipientError&&<div className="notice notice-error">{recipientError}</div>}
+      {recipientMsg&&<div className="notice notice-success">{recipientMsg}</div>}
       {isAdmin&&<div className="recipient-layout">
         <form className="recipient-form" onSubmit={addRecipient}>
-          <div className="form-row"><label className="field"><span>Name / household / officer</span><input required maxLength={120} value={recipientForm.name} onChange={e=>setRecipientForm(f=>({...f,name:e.target.value}))}/></label><label className="field"><span>Phone number</span><input required placeholder="+919876543210" value={recipientForm.phone_e164} onChange={e=>setRecipientForm(f=>({...f,phone_e164:e.target.value}))}/></label></div>
-          <div className="form-row"><label className="field"><span>Alert area</span><select value={recipientForm.location_id} onChange={e=>setRecipientForm(f=>({...f,location_id:e.target.value}))}><option value="">All monitored areas</option>{locations.map(x=><option key={x.id} value={x.id}>{x.name}, {x.state}</option>)}</select></label><label className="field"><span>Language</span><select value={recipientForm.language} onChange={e=>setRecipientForm(f=>({...f,language:e.target.value}))}><option value="en">English</option><option value="hi">Hindi</option><option value="as">Assamese</option></select></label></div>
-          <div className="channel-checks"><span><strong>Delivery channel:</strong> Text SMS</span></div>
-          <label className="consent-check"><input type="checkbox" required checked={recipientForm.consent_confirmed} onChange={e=>setRecipientForm(f=>({...f,consent_confirmed:e.target.checked}))}/><span>I confirm this recipient explicitly opted in to PRAHARI emergency/advisory notifications and understands how to request removal.</span></label>
-          <button className="btn btn-primary">Add SMS recipient</button>
+          <div className="form-row">
+            <label className="field"><span>Name</span><input required maxLength={120} value={recipientForm.name} onChange={e=>setRecipientForm(f=>({...f,name:e.target.value}))}/></label>
+            <label className="field"><span>Phone</span><input required placeholder="+919876543210" value={recipientForm.phone_e164} onChange={e=>setRecipientForm(f=>({...f,phone_e164:e.target.value}))}/></label>
+          </div>
+          <div className="form-row">
+            <label className="field"><span>Area</span><select value={recipientForm.location_id} onChange={e=>setRecipientForm(f=>({...f,location_id:e.target.value}))}><option value="">All monitored areas</option>{locations.map(x=><option key={x.id} value={x.id}>{x.name}, {x.state}</option>)}</select></label>
+            <label className="field"><span>Language</span><select value={recipientForm.language} onChange={e=>setRecipientForm(f=>({...f,language:e.target.value}))}><option value="en">English</option><option value="hi">Hindi</option><option value="as">Assamese</option></select></label>
+          </div>
+          <label className="consent-check"><input type="checkbox" required checked={recipientForm.consent_confirmed} onChange={e=>setRecipientForm(f=>({...f,consent_confirmed:e.target.checked}))}/><span>Consent confirmed</span></label>
+          <button className="btn btn-primary">Add recipient</button>
         </form>
-        <div className="recipient-list">{recipients.length?recipients.map(r=>{const loc=locations.find(x=>x.id===r.location_id);return <div className={`recipient-row ${r.consent_status!=='ACTIVE'?'recipient-revoked':''}`} key={r.id}><div><strong>{r.name}</strong><span>{r.phone_e164}</span><small>{loc?`${loc.name}, ${loc.state}`:'All monitored areas'} · {r.language.toUpperCase()}{r.registered_by_officer?` · by ${r.registered_by_officer}`:''}</small></div><div className="recipient-channels">{r.sms_enabled&&<Badge>SMS</Badge>}<Badge tone={r.consent_status==='ACTIVE'?'good':'neutral'}>{r.consent_status}</Badge></div>{r.consent_status==='ACTIVE'&&<button className="btn btn-ghost small" onClick={()=>revokeRecipient(r.id)}>Revoke</button>}</div>}):<Empty title="No opted-in recipients" detail="Add opted-in phone numbers here before issuing SMS alerts."/>}</div>
+        <div className="recipient-list">{recipients.length?recipients.map(r=>{const loc=locations.find(x=>x.id===r.location_id);return <div className={'recipient-row '+(r.consent_status!=='ACTIVE'?'recipient-revoked':'')} key={r.id}>
+          <div><strong>{r.name}</strong><span>{r.phone_e164}</span><small>{loc?(loc.name+', '+loc.state):'All monitored areas'} · {r.language.toUpperCase()}</small></div>
+          <div className="recipient-channels"><Badge>SMS</Badge><Badge tone={r.consent_status==='ACTIVE'?'good':'neutral'}>{r.consent_status}</Badge></div>
+          {r.consent_status==='ACTIVE'&&<button className="btn btn-ghost small" onClick={()=>revokeRecipient(r.id)}>Revoke</button>}
+        </div>}):<Empty title="No recipients"/>}</div>
       </div>}
-      <p className="fine">PRAHARI never sends to arbitrary numbers. SMS delivery is restricted to this consented directory and is logged per recipient.</p>
     </Panel>
-
-    <details className="disclosure"><summary>Twilio setup & delivery behavior</summary><div className="disclosure-body"><p>On Render, configure SMS in the API service’s Environment settings and redeploy. For local development, use the project <code>.env</code>. Credentials belong only on the backend.</p><p>Set <code>PRAHARI_SMS_ENABLED=true</code>, <code>PRAHARI_TWILIO_ACCOUNT_SID</code>, <code>PRAHARI_TWILIO_AUTH_TOKEN</code>, and either <code>PRAHARI_TWILIO_SMS_FROM</code> or <code>PRAHARI_TWILIO_MESSAGING_SERVICE_SID</code>.</p><p>Delivery status callbacks require a public HTTPS base URL. For a local demo, the admin can refresh delivery status manually. Use View SMS delivery details to inspect provider errors before retrying failed messages.</p><p>For India SMS, sender/DLT requirements depend on the route and account setup; finish provider compliance before relying on this for public deployment.</p></div></details>
-    <details className="disclosure"><summary>Satellite & post-event detection roadmap</summary><div className="disclosure-body"><p><strong>Current:</strong> {satellite?.pipeline_status || 'Visual basemap context only'}.</p><p>{satellite?.detection_module?.note}</p><p>Landslide4Sense-style semantic segmentation remains a separate post-event inventory capability and is not represented as future-risk forecasting.</p></div></details>
-    <details className="disclosure"><summary>Experimental ML model</summary><div className="disclosure-body"><p><strong>{model?.model_type || 'Research ensemble'}</strong></p><p>{model?.warning || 'Experimental model is not field calibrated.'}</p><p className="fine">Primary operational UI uses the transparent screening baseline until a real NER dataset is trained and validated spatially/temporally.</p></div></details>
-    <details className="disclosure"><summary>Infrastructure & routing · prototype data</summary><div className="disclosure-body"><p>These modules are preserved but clearly marked as non-authoritative until verified GIS layers are connected.</p><div className="mini-list">{infra.filter(x=>x.location_id===selected?.id).map(x=><span key={`${x.type}-${x.name}`}>{x.type}: {x.name} · {x.data_status}</span>)}{routes.filter(x=>x.location_id===selected?.id).map(x=><span key={x.id}>Route suggestion: {x.route} · {x.status} · not a safety claim</span>)}</div></div></details>
-    <details className="disclosure"><summary>Reference adaptations & licensing</summary><div className="disclosure-body"><p>GLAS informed rainfall-history and data-provenance design. Landslide4Sense informed the separate post-event segmentation roadmap. The boosted-tree competition repository informed reproducible training organization. No third-party repository code is copied into the core application unless its license is recorded in the project documentation.</p></div></details>
   </div>;
 }
 

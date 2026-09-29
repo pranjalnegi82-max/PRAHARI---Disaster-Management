@@ -421,3 +421,82 @@ footer{border-top:1px solid var(--line);background:#fff;color:#7a8794;text-align
 /* SIH26192 flood workspace */
 .flood-page{display:grid;gap:18px}.flood-banner{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:24px;background:linear-gradient(115deg,#0b2d40,#086b73);color:#fff;padding:26px;border-radius:16px}.flood-banner h2{font-size:32px;margin:8px 0}.flood-banner p{color:#d3eff0;line-height:1.5}.flood-banner small{color:#d3eff0;line-height:1.6}.flood-eyebrow{text-transform:uppercase;letter-spacing:.09em;font-size:11px;font-weight:700}.flood-windows{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.flood-windows h2{font-size:26px;margin:12px 0}.flood-windows h2 small{font-size:13px;color:#607580}.flood-columns{display:grid;grid-template-columns:1.15fr 1fr;gap:16px}.flood-page .panel p,.flood-page li{line-height:1.7}.flood-page li{margin-bottom:6px}.flood-map{height:280px;margin:15px 0;border-radius:10px;overflow:hidden}.flood-config{min-height:330px;font-family:monospace;line-height:1.5;margin:10px 0}.flood-page summary{font-weight:700;cursor:pointer}.flood-history>div{display:flex;gap:15px;justify-content:space-between;padding:12px 0;border-bottom:1px solid #e4eaee}.flood-history span{color:#526875}.flood-history a{color:#066976;font-weight:700}.flood-page .notice{display:block;line-height:1.6}
 @media(max-width:850px){.flood-banner,.flood-columns{grid-template-columns:1fr}.flood-windows{grid-template-columns:1fr}.flood-history>div{flex-direction:column;gap:6px}}
+
+
+/* v11 live flash-flood command dashboard */
+.overview-hero{
+  background:linear-gradient(125deg,#0a2737 0%,#123c42 52%,#1d5960 100%);
+}
+.notice-success{border-color:#b8dfcc;background:#edf9f2;color:#1f6948}
+.command-title{margin-bottom:0}
+.command-title .eyebrow{color:#547284}
+.command-actions{display:flex;align-items:center;gap:8px}
+.flood-command{gap:14px}
+.flood-kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.flood-kpi{min-height:118px;background:#fff;border:1px solid var(--line);border-radius:13px;padding:16px;box-shadow:var(--shadow-soft);display:flex;flex-direction:column;justify-content:space-between}
+.flood-kpi>span{font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.08em;color:#718191}
+.flood-kpi>strong{font-size:29px;line-height:1;color:#142638;letter-spacing:-.03em}
+.flood-kpi>strong em{font-size:12px;font-style:normal;font-weight:650;color:#718191;letter-spacing:0}
+.flood-kpi>small{font-size:10px;color:#72808d}
+.flood-kpi.flood-critical{border-top:4px solid var(--critical)}
+.flood-kpi.flood-high{border-top:4px solid var(--high)}
+.flood-kpi.flood-moderate{border-top:4px solid var(--moderate)}
+.flood-kpi.flood-low{border-top:4px solid var(--low)}
+.flood-kpi.flood-unknown{border-top:4px solid var(--unknown)}
+.flood-source-strip{min-height:44px;display:flex;align-items:center;gap:13px;flex-wrap:wrap;background:#0c2637;color:#d9e7ef;border-radius:11px;padding:10px 14px;font-size:11px}
+.flood-source-strip strong{color:#fff}
+.flood-source-strip>span:not(.source-state){color:#9fb4c2}
+.source-state{display:inline-flex;align-items:center;border-radius:99px;padding:4px 8px;font-weight:800;font-size:9px;letter-spacing:.06em}
+.source-current{background:#164e3c;color:#86e0b2}
+.source-stale{background:#5a4615;color:#ffd474}
+.source-missing,.source-not_fetched{background:#533033;color:#ffb5b5}
+.flood-dashboard-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(320px,.8fr);gap:14px}
+.flood-dashboard-grid .panel{margin:0}
+.panel-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.panel-heading h2{margin:3px 0 0;font-size:17px}
+.panel-heading .eyebrow{color:#607487}
+.flood-map-card .flood-map{height:470px;margin:0;border:1px solid #d8e2e8;border-radius:10px}
+.flood-rain-card{display:flex;flex-direction:column}
+.rain-bars{display:flex;flex-direction:column;gap:18px;margin:10px 0 20px}
+.rain-row{display:grid;grid-template-columns:70px 1fr 72px;gap:10px;align-items:center}
+.rain-row>div:first-child{display:flex;flex-direction:column}
+.rain-row>div:first-child strong{font-size:13px}
+.rain-row>div:first-child span{font-size:10px;color:var(--muted)}
+.rain-row>b{text-align:right;font-size:10px;color:#485c6b}
+.rain-track{height:10px;border-radius:99px;background:#edf1f4;overflow:hidden}
+.rain-track span{display:block;height:100%;min-width:2px;border-radius:inherit;background:linear-gradient(90deg,#2b8cbe,#0e5a84)}
+.compact-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;border-top:1px solid var(--line);padding-top:14px;margin-top:auto;margin-bottom:16px}
+.compact-metrics>div{background:#f7f9fb;border-radius:8px;padding:9px;min-width:0}
+.compact-metrics span,.compact-metrics strong{display:block}
+.compact-metrics span{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.compact-metrics strong{font-size:11px;margin-top:4px;overflow:hidden;text-overflow:ellipsis}
+.flood-config-card{padding:18px}
+.flood-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.flood-form .field-wide{grid-column:span 2}
+.flood-form .field-actions{display:flex;align-items:flex-end}
+.flood-form .field-actions .btn{width:100%}
+.flood-history-card{padding-bottom:10px}
+.flood-history>div{display:grid;grid-template-columns:70px 90px 1fr auto;align-items:center;gap:12px;padding:10px 2px}
+.flood-history strong{font-size:12px}
+.flood-history span{font-size:11px}
+.flood-history a{font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+.location-results button b{font-size:9px;color:#0b67d1;align-self:center}
+.location-search-status{font-size:11px;color:var(--muted);padding:10px;display:block}
+
+@media(max-width:1180px){
+  .flood-kpi-grid{grid-template-columns:repeat(3,1fr)}
+  .flood-dashboard-grid{grid-template-columns:1fr}
+  .flood-map-card .flood-map{height:420px}
+  .flood-form{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:650px){
+  .flood-kpi-grid{grid-template-columns:repeat(2,1fr)}
+  .flood-kpi{min-height:105px}
+  .flood-kpi>strong{font-size:25px}
+  .flood-map-card .flood-map{height:350px}
+  .flood-form{grid-template-columns:1fr}
+  .flood-form .field-wide{grid-column:auto}
+  .rain-row{grid-template-columns:60px 1fr 60px}
+  .compact-metrics{grid-template-columns:1fr}
+  .flood-history>div{grid-template-columns:1fr 1fr}
+}

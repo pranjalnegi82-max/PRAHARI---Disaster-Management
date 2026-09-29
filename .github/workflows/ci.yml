@@ -28,7 +28,7 @@ jobs:
           PRAHARI_AUTH_REQUIRED: "false"
         run: python -c "import main; print(main.app.version)"
       - name: Backend and satellite regressions
-        run: python -m pytest qa/test_v9.py qa/test_satellite.py -q
+        run: python -m pytest qa/test_flood.py qa/test_v9.py qa/test_satellite.py -q
 
   frontend:
     runs-on: ubuntu-latest
@@ -53,12 +53,13 @@ jobs:
         working-directory: frontend
         run: |
           npm run dev -- --port 5173 > /tmp/prahari-vite.log 2>&1 &
+          NODE_PATH=/tmp/prahari-browser/node_modules node ../qa/flood_ui.cjs
           NODE_PATH=/tmp/prahari-browser/node_modules node ../qa/satellite_ui.cjs
           NODE_PATH=/tmp/prahari-browser/node_modules node ../qa/notifications_ui.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: satellite-ui-synthetic-fixtures
+          name: prahari-ui-regressions
           path: test-results/
           retention-days: 7
 

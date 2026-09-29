@@ -94,6 +94,13 @@ def initialize_schema(connect):
             UNIQUE(alert_id,recipient_id,channel)
         )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_notification_deliveries_alert ON notification_deliveries(alert_id,channel,status)")
+        cur.execute("""CREATE TABLE IF NOT EXISTS monitored_locations(
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL, state TEXT NOT NULL,
+            country TEXT DEFAULT 'India', lat REAL NOT NULL, lon REAL NOT NULL,
+            source TEXT NOT NULL, source_ref TEXT, active INTEGER DEFAULT 1,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+            UNIQUE(name,state,lat,lon))""")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_monitored_locations_active ON monitored_locations(active,state,name)")
         cur.execute("""CREATE TABLE IF NOT EXISTS flood_basins(
             location_id INTEGER PRIMARY KEY, config_json TEXT NOT NULL, updated_at INTEGER NOT NULL)""")
         cur.execute("""CREATE TABLE IF NOT EXISTS flood_gauges(

@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-VERSION = "baseline-screen-v1.0"
+VERSION = "baseline-screen-v1.1"
 
 @dataclass
 class BaselineResult:
@@ -37,7 +37,7 @@ def assess(values: dict[str, Any], telemetry_source: str | None = None) -> Basel
     missing = [k for k, v in required.items() if v is None]
     limitations = [
         "This is a transparent screening baseline, not a calibrated landslide probability.",
-        "Thresholds are research-informed generic screening rules and are not locally calibrated warning thresholds for Northeast India.",
+        "Thresholds are research-informed generic screening rules and are not locally calibrated warning thresholds for a specific hill catchment.",
     ]
     if missing:
         return BaselineResult("INSUFFICIENT_DATA", "UNKNOWN", None, [], missing, limitations)

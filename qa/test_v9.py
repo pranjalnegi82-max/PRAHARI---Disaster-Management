@@ -19,6 +19,7 @@ if str(BACKEND) not in sys.path:
 TEST_DB = ROOT / "qa" / "prahari_test.db"
 os.environ["PRAHARI_DB_PATH"] = str(TEST_DB)
 os.environ["PRAHARI_AUTH_REQUIRED"] = "false"
+os.environ["PRAHARI_ENABLE_TEST_FIXTURES"] = "true"
 
 import main  # noqa: E402
 
@@ -31,10 +32,12 @@ def clean_db(monkeypatch):
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
     main.LIVE_WEATHER_CACHE.clear()
+    main.TERRAIN_CACHE.clear()
     yield
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
     main.LIVE_WEATHER_CACHE.clear()
+    main.TERRAIN_CACHE.clear()
 
 
 @pytest.fixture
@@ -189,7 +192,8 @@ def test_satellite_endpoint_does_not_claim_model_inference(client, monkeypatch):
     body = r.json()
     assert body["pipeline_status"] == "SCENE_DISCOVERY_IMPLEMENTED"
     assert body["analysis_mode"] == "SENTINEL2_SCENE_QA_PLUS_VISUAL_CONTEXT"
-    assert body["detection_module"]["status"] == "CHECK_MODEL_STATUS_ENDPOINT"
+    assert body["terrain_context"]["source_state"] in {"CURRENT","STALE","MISSING","TEST_FIXTURE"}
+    assert "ndvi_baseline" not in body["terrain_context"]
     assert "candidate_polygons" not in body
 
 
