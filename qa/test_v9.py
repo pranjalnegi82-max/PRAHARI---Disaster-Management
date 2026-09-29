@@ -21,6 +21,7 @@ os.environ["PRAHARI_DB_PATH"] = str(TEST_DB)
 os.environ["PRAHARI_AUTH_REQUIRED"] = "false"
 
 import main  # noqa: E402
+REAL_FETCH_LIVE_WEATHER = main.fetch_live_weather
 
 
 @pytest.fixture(autouse=True)
@@ -46,10 +47,11 @@ def client():
 
 
 def test_replay_mode_is_rejected(client):
-    assert client.get('/api/live/locations/1?mode=live').status_code == 422
+    assert client.get('/api/live/locations/1?mode=replay').status_code == 422
 
 
 def test_provider_failure_is_missing_not_low(monkeypatch, client):
+    monkeypatch.setattr(main, 'fetch_live_weather', REAL_FETCH_LIVE_WEATHER)
     main.LIVE_WEATHER_CACHE.clear()
     monkeypatch.setattr(main, "_load_source_cache", lambda key: None)
     def fail(*args, **kwargs):
@@ -65,6 +67,7 @@ def test_provider_failure_is_missing_not_low(monkeypatch, client):
 
 
 def test_stale_real_packet_is_labeled_stale(monkeypatch, client):
+    monkeypatch.setattr(main, 'fetch_live_weather', REAL_FETCH_LIVE_WEATHER)
     now = int(main.time.time())
     packet = main.build_replay_packet(main.LOCATIONS[0])
     packet.update({
