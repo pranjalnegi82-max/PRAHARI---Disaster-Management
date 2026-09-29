@@ -294,7 +294,7 @@ function PortalApp(){
 
 function AdminPortal({session,onLogout}) {
   const [view, setView] = useState('Flash Floods');
-  const [mode, setMode] = useState('live');
+  const mode = 'live';
   const [locations, setLocations] = useState([]);
   const [selectedId, setSelectedId] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -313,14 +313,11 @@ function AdminPortal({session,onLogout}) {
   async function loadLocations(force=false) {
     setError(''); setRefreshing(true);
     try {
-      let data = await get(`/api/live/locations?mode=${mode}&force=${force}`);
-      if (mode==='live' && needsBrowserWeatherFallback(data)) {
-        try { data = await browserDirectLiveFallback(data); }
-        catch (fallbackError) { console.warn('PRAHARI browser weather fallback unavailable:', fallbackError); }
-      }
+      const data = await get(`/api/live/locations?force=${force}`);
       setLocations(data);
       if (!data.some(x=>x.id===selectedId) && data[0]) setSelectedId(data[0].id);
-    } catch (e) { setError(e.message); }
+      return data;
+    } catch (e) { setError(e.message); return []; }
     finally { setLoading(false); setRefreshing(false); }
   }
   async function loadSideData() {
@@ -331,16 +328,14 @@ function AdminPortal({session,onLogout}) {
     if (tasks[3].status==='fulfilled') setSources(tasks[3].value);
     if (tasks[4].status==='fulfilled') setAuth(tasks[4].value);
   }
-  useEffect(()=>{ loadLocations(); loadSideData(); }, [mode]);
-  useEffect(()=>{ setAssessment(null); setAssessmentId(null); }, [selectedId, mode]);
+  useEffect(()=>{ loadLocations(); loadSideData(); }, []);
+  useEffect(()=>{ setAssessment(null); setAssessmentId(null); }, [selectedId]);
 
   async function runAssessment() {
     if (!selected) return;
     setRefreshing(true); setError('');
     try {
-      const out = mode==='live' && selected?.__browser_provider_payload
-        ? await post(`/api/assessments/${selected.id}/browser-relay`, {provider:'OPEN_METEO', payload:selected.__browser_provider_payload})
-        : await post(`/api/assessments/${selected.id}?mode=${mode}&force=true`, {});
+      const out = await post(`/api/assessments/${selected.id}?force=true`, {});
       setAssessment(out.assessment); setAssessmentId(out.assessment_id);
       await loadLocations(true); await loadSideData();
     } catch(e) { setError(e.message); }
@@ -365,17 +360,13 @@ function AdminPortal({session,onLogout}) {
         <span className={`status-dot ${selected?.data_state==='CURRENT'?'online':'degraded'}`}/>
         <div><strong>{selected?.data_state==='CURRENT'?'Live context':'Data status'}</strong><small>{STATE_LABEL[selected?.data_state] || 'Waiting for source'}</small></div>
       </div>
-      <p className="sidebar-note">Decision-support prototype · SIH26192</p>
+
     </aside>
 
     <div className="app-frame">
       <header className="topbar">
-        <LocationSelector locations={locations} selectedId={selectedId} onSelect={setSelectedId} compact/>
+        <LocationSelector locations={locations} selectedId={selectedId} onSelect={setSelectedId} onAdded={async newId=>{await loadLocations(true);setSelectedId(newId)}} compact/>
         <div className="top-actions">
-          <div className="mode-toggle compact" role="group" aria-label="Data mode">
-            <button className={mode==='live'?'active':''} onClick={()=>setMode('live')}>Live</button>
-            <button className={mode==='replay'?'active':''} onClick={()=>setMode('replay')}>Replay</button>
-          </div>
           <button className="icon-btn" onClick={()=>loadLocations(true)} disabled={refreshing} title="Refresh data" aria-label="Refresh data"><Icon name="refresh" size={18}/></button>
           <button className="icon-btn" onClick={()=>setView('Reports & Alerts')} title="Reports and alerts" aria-label="Reports and alerts"><Icon name="bell" size={18}/>{attention>0&&<span className="icon-count">{attention}</span>}</button>
           <div className="portal-identity" title="Admin Command Center"><span className="user-avatar">A</span><div><strong>Admin</strong><small>Command Center</small></div></div>
@@ -386,8 +377,8 @@ function AdminPortal({session,onLogout}) {
       <main className="workspace">
         {error && <ErrorBox message={error} onRetry={()=>loadLocations(true)}/>} 
         {loading ? <Loading/> : <>
-          {view==='Flash Floods' && <FlashFloodPanel key={`${selectedId}-${mode}`} selected={selected} mode={mode} onRefreshAlerts={loadSideData}/>}
-          {view==='Overview' && <Overview location={activeAssessment} locations={locations} alerts={unresolved} reports={reports} assessmentId={assessmentId} onAssess={runAssessment} onNavigate={setView} refreshing={refreshing} mode={mode}/>} 
+          {view==='Flash Floods' && <FlashFloodPanel key={selectedId} selected={selected} onRefreshAlerts={loadSideData}/>}
+          {view==='Overview' && <Overview location={activeAssessment} locations={locations} alerts={unresolved} reports={reports} assessmentId={assessmentId} onAssess={runAssessment} onNavigate={setView} refreshing={refreshing} mode="live"/>} 
           {view==='Risk Map' && <RiskMapPage locations={locations} selected={selected} onSelect={loc=>setSelectedId(loc.id)} onAssess={runAssessment} assessment={activeAssessment}/>} 
           {view==='Reports & Alerts' && <ReportsAlerts reports={reports} alerts={alerts} selected={selected} locations={locations} auth={auth} onRefresh={loadSideData}/>} 
           {view==='Data & Settings' && <DataSettings system={system} sources={sources} auth={auth} selected={selected} locations={locations} session={session} onLogout={onLogout} onAuthRefresh={loadSideData}/>} 
