@@ -49,10 +49,19 @@ def configured(client):
     return b
 
 
-def test_unconfigured_area_cannot_screen_or_record(client):
-    assert client.get('/api/flood/basins/1').status_code==409
-    assert client.get('/api/flood/screen/1').status_code==409
-    assert client.post('/api/flood/assessments/1').status_code==409
+def test_unconfigured_area_uses_non_persistent_auto_screening_profile(client,monkeypatch):
+    monkeypatch.setattr(main,'fetch_live_weather',lambda x:packet())
+    basin=client.get('/api/flood/basins/1')
+    assert basin.status_code==200
+    assert basin.json()['context_status']=='AUTO_SCREENING'
+    screened=client.get('/api/flood/screen/1')
+    assert screened.status_code==200
+    assert screened.json()['status']=='SCREENED'
+    saved=client.post('/api/flood/assessments/1')
+    assert saved.status_code==201
+    assert saved.json()['assessment']['basin']['context_status']=='AUTO_SCREENING'
+    # Automatic research screening must not create an operational alert draft.
+    assert client.post(f"/api/flood/records/{saved.json()['id']}/draft").status_code==409
 
 
 @pytest.mark.parametrize('bad',[None,-1,float('nan'),float('inf')])
