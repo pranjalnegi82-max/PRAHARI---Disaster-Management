@@ -37,7 +37,7 @@ def live_packet(location_id=1, name='Shimla', state='Himachal Pradesh'):
         'rain_forecast_1h_mm':12,'rain_forecast_3h_mm':32,'rain_forecast_6h_mm':58,
         'rain_forecast_24h_mm':92,'rain_forecast_48h_mm':120,'rain_forecast_72h_mm':155,
         'max_rain_probability_24h':85,'forecast':[],
-        'terrain_slope_deg':34.5,'terrain_elevation_m':2200.0,'terrain_local_relief_m':180.0,
+        'terrain_slope_deg':42.0,'terrain_elevation_m':2200.0,'terrain_local_relief_m':180.0,
         'terrain_source':'QA terrain provider'
     }
 
