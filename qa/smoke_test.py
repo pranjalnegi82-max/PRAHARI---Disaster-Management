@@ -71,7 +71,6 @@ def main():
     check('Geo-fence targeting API',lambda:req('/api/geofence/check?lat=27.3314&lon=88.6138&radius_km=25')[1].get('inside_monitored_geofence'))
 
     def iot():
-        d=req('/api/iot/demo/1','POST')[1]
         q=req('/api/iot/telemetry/latest?location_id=1')[1]
         if not q.get('available'): raise RuntimeError('telemetry not stored')
         return f"{d['edge_state']} / {q['telemetry']['source']}"
