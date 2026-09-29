@@ -26,6 +26,43 @@ const fmtTime = (v) => {
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
 };
 
+function terrainSampleCoordinates(loc) {
+  const dlat=1/111.32;
+  const coslat=Math.max(.2,Math.abs(Math.cos(Number(loc.lat)*Math.PI/180)));
+  const dlon=1/(111.32*coslat);
+  return [[loc.lat,loc.lon],[Number(loc.lat)+dlat,loc.lon],[Number(loc.lat)-dlat,loc.lon],[loc.lat,Number(loc.lon)+dlon],[loc.lat,Number(loc.lon)-dlon]];
+}
+
+function terrainFromRows(rows) {
+  if (!Array.isArray(rows) || rows.length!==5) return null;
+  const e=rows.map(x=>Number(x?.elevation));
+  if (e.some(x=>!Number.isFinite(x))) return null;
+  const [center,north,south,east,west]=e;
+  const dzNS=(north-south)/2000;
+  const dzEW=(east-west)/2000;
+  const slope=Math.atan(Math.sqrt(dzNS*dzNS+dzEW*dzEW))*180/Math.PI;
+  return {slope_deg:Number(slope.toFixed(1)),elevation_m:Number(center.toFixed(1)),
+    local_relief_m:Number((Math.max(...e)-Math.min(...e)).toFixed(1)),sample_spacing_m:1000,
+    method:'central gradient from N/S/E/W Open-Meteo elevation samples'};
+}
+
+async function browserTerrainContexts(locations) {
+  const coords=locations.flatMap(terrainSampleCoordinates);
+  const params=new URLSearchParams({
+    latitude:coords.map(x=>x[0]).join(','),
+    longitude:coords.map(x=>x[1]).join(','),
+    timezone:'UTC',current:'temperature_2m',forecast_hours:'1'
+  });
+  const response=await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+  if(!response.ok) return {};
+  const raw=await response.json();
+  const rows=Array.isArray(raw)?raw:[raw];
+  if(rows.length!==coords.length) return {};
+  const terrain={};
+  locations.forEach((loc,i)=>{const item=terrainFromRows(rows.slice(i*5,i*5+5));if(item)terrain[loc.id]=item;});
+  return terrain;
+}
+
 async function browserDirectLiveFallback(locations) {
   if (!Array.isArray(locations) || !locations.length) return locations || [];
   const params = new URLSearchParams({
@@ -37,14 +74,17 @@ async function browserDirectLiveFallback(locations) {
     past_hours: '264',
     forecast_hours: '72',
   });
-  const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+  const [response,terrain] = await Promise.all([
+    fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`),
+    browserTerrainContexts(locations).catch(()=>({}))
+  ]);
   if (!response.ok) throw new Error(`Direct Open-Meteo fallback failed: ${response.status} ${response.statusText}`);
   const raw = await response.json();
   const payloads = Array.isArray(raw) ? raw : [raw];
   if (payloads.length !== locations.length) throw new Error('Direct Open-Meteo fallback returned an unexpected location count.');
   const assessed = await Promise.all(locations.map(async (loc,i)=>{
-    const parsed = await post(`/api/live/browser-relay/${loc.id}`, {provider:'OPEN_METEO', payload:payloads[i]});
-    return {...parsed, __browser_provider_payload:payloads[i]};
+    const parsed = await post(`/api/live/browser-relay/${loc.id}`, {provider:'OPEN_METEO', payload:payloads[i], terrain:terrain[loc.id]||null});
+    return {...parsed, __browser_provider_payload:payloads[i], __browser_terrain:terrain[loc.id]||null};
   }));
   return assessed;
 }
@@ -57,7 +97,7 @@ function needsBrowserWeatherFallback(data) {
 
 function Badge({children, tone='neutral'}) { return <span className={`badge badge-${tone}`}>{children}</span>; }
 function StateBadge({state}) {
-  const tone = state === 'CURRENT' ? 'good' : state === 'STALE' || state === 'HISTORICAL_REPLAY' ? 'warn' : state === 'MISSING' ? 'danger' : 'neutral';
+  const tone = state === 'CURRENT' ? 'good' : state === 'STALE' ? 'warn' : state === 'MISSING' ? 'danger' : 'neutral';
   return <Badge tone={tone}>{STATE_LABEL[state] || state || 'Unknown'}</Badge>;
 }
 function RiskBadge({level='UNKNOWN'}) {
@@ -172,7 +212,7 @@ function PortalLogin({onAuthenticated,initialPortal='ADMIN'}) {
         </form>
       </section>
     </main>
-    <footer className="login-footer">PRAHARI · Role-separated operational access · SIH26192<span className="login-photo-credit">Yumthang Valley, Sikkim · Photo by <a href="https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0" target="_blank" rel="noreferrer">nur alam / Unsplash</a></span></footer>
+    <footer className="login-footer">PRAHARI · Role-separated operational access · SIH26192</footer>
   </div>;
 }
 
@@ -339,7 +379,7 @@ function AdminPortal({session,onLogout}) {
     setRefreshing(true); setError('');
     try {
       const out = mode==='live' && selected?.__browser_provider_payload
-        ? await post(`/api/assessments/${selected.id}/browser-relay`, {provider:'OPEN_METEO', payload:selected.__browser_provider_payload})
+        ? await post(`/api/assessments/${selected.id}/browser-relay`, {provider:'OPEN_METEO', payload:selected.__browser_provider_payload, terrain:selected.__browser_terrain||null})
         : await post(`/api/assessments/${selected.id}?mode=${mode}&force=true`, {});
       setAssessment(out.assessment); setAssessmentId(out.assessment_id);
       await loadLocations(true); await loadSideData();
@@ -436,7 +476,7 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
       </div>
     </section>
 
-    <p className="terrain-credit">Yumthang Valley, Sikkim · Photo by <a href="https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0" target="_blank" rel="noreferrer">nur alam / Unsplash</a></p>
+    
 
     <section className="summary-strip" aria-label="Current observation summary">
       <StatCard icon="alert" label="Current risk" value={RISK[riskLevel]?.label || 'Unknown'} unit="" detail={location.risk_percent == null ? 'Insufficient data' : `${fmt(location.risk_percent,0)}/100 screening index`} tone={riskLevel==='LOW'?'green':riskLevel==='MODERATE'?'amber':riskLevel==='UNKNOWN'?'blue':'red'}/>
@@ -444,8 +484,6 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
       <StatCard icon="water" label="Soil wetness" value={fmt(location.soil_moisture)} unit="%" detail={`Slope context: ${fmt(location.slope)}°`} tone="teal"/>
       <StatCard icon="data" label="Data status" value={dataDetail} unit="" detail={`${fmt(location.data_completeness_pct,0)}% complete`} tone={location.data_state==='CURRENT'?'green':'amber'}/>
     </section>
-
-    {location.weather_transport==='BROWSER_DIRECT_RELAY' && <div className="notice notice-warn"><strong>Direct live-data transport active.</strong><span>Open-Meteo was fetched by this browser because the cloud backend was rate-limited. Values are live provider data, but the server did not independently re-fetch them.</span></div>}
     {stale && <div className="notice notice-warn"><strong>Cached observations in use.</strong><span>Review source timestamps before operational decisions.</span></div>}
     {missing && <div className="notice notice-error"><strong>Assessment incomplete.</strong><span>Missing data is not converted into low risk. Missing: {(location.missing_inputs||[]).join(', ') || 'required weather fields'}.</span></div>}
 
