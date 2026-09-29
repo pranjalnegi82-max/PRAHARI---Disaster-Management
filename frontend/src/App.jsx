@@ -601,7 +601,7 @@ function RiskMapPage({locations,selected,onSelect,onAssess,assessment}) {
   useEffect(()=>{ if (!selected) return; Promise.allSettled([get(`/api/assessments/${selected.id}/history`),get(`/api/forecast-risk/${selected.id}`)]).then(([h,f])=>{if(h.status==='fulfilled')setHistory(h.value);if(f.status==='fulfilled')setForecast(f.value);}); },[selected?.id]);
 
   return <div className="risk-map-page">
-    <div className="map-toolbar"><div><h1>{basemap==='intelligence'?'Satellite Intelligence':'Risk Map'}</h1><p>{basemap==='intelligence'?'Real Sentinel-2 scene review is separated from weather-risk screening and visual basemaps.':'Weather risk, field evidence and satellite context remain explicitly separated.'}</p></div><div className="segmented"><button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button><button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite view</button><button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence')}>Sentinel-2 intelligence</button></div></div>
+    <div className="map-toolbar"><div><h1>{basemap==='intelligence'?'Sentinel-2 Imagery':'Risk Map'}</h1><p>{basemap==='intelligence'?'Recent Sentinel-2 acquisitions for the selected monitoring area.':'Weather risk, field evidence and satellite context remain explicitly separated.'}</p></div><div className="segmented"><button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button><button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite view</button><button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence')}>Sentinel-2 imagery</button></div></div>
 
     {basemap==='intelligence'
       ? <SatelliteIntelligence key={selected?.id} selected={selected} searchScenes={browserSentinel2Search} SceneCard={SatelliteSceneCard}/>
@@ -782,25 +782,33 @@ function AlertsPane({alerts,auth,locations,onRefresh}) {
 }
 
 function DataSettings({system,sources,auth,selected,locations,session,onLogout,onAuthRefresh}) {
-  const [channels,setChannels]=useState(null); const [satellite,setSatellite]=useState(null);
+  const [channels,setChannels]=useState(null);
   const [recipients,setRecipients]=useState([]); const [recipientError,setRecipientError]=useState(''); const [recipientMsg,setRecipientMsg]=useState('');
   const [recipientForm,setRecipientForm]=useState({name:'',phone_e164:'+91',location_id:selected?.id||'',language:'en',sms_enabled:true,consent_confirmed:false});
   const isAdmin=['ADMIN','DEV_OPERATOR'].includes(auth?.current_role);
   async function loadSettings(){
-    const tasks=await Promise.allSettled([get('/api/notification/channels'),selected?get(`/api/satellite/${selected.id}`):Promise.resolve(null),get('/api/notification/recipients')]);
-    const [c,s,n]=tasks;if(c.status==='fulfilled')setChannels(c.value);if(s.status==='fulfilled')setSatellite(s.value);if(n.status==='fulfilled'){setRecipients(n.value);setRecipientError('');}else setRecipientError(n.reason?.message||'Admin key required to manage notification recipients.');
+    const tasks=await Promise.allSettled([get('/api/notification/channels'),get('/api/notification/recipients')]);
+    const [c,n]=tasks;if(c.status==='fulfilled')setChannels(c.value);if(n.status==='fulfilled'){setRecipients(n.value);setRecipientError('');}else setRecipientError(n.reason?.message||'Admin access is required to manage notification recipients.');
   }
   useEffect(()=>{loadSettings();},[selected?.id,auth?.current_role]);
   useEffect(()=>{setRecipientForm(f=>({...f,location_id:selected?.id||''}));},[selected?.id]);
   async function addRecipient(e){e.preventDefault();setRecipientMsg('');setRecipientError('');try{const payload={...recipientForm,location_id:recipientForm.location_id===''?null:Number(recipientForm.location_id)};await post('/api/notification/recipients',payload);setRecipientMsg('SMS recipient enrolled. Only explicitly opted-in contacts will receive alerts.');setRecipientForm(f=>({...f,name:'',phone_e164:'+91',consent_confirmed:false}));await loadSettings();}catch(err){setRecipientError(err.message);}}
   async function revokeRecipient(id){if(!window.confirm('Revoke this recipient from future PRAHARI SMS alerts?'))return;setRecipientError('');try{await patch(`/api/notification/recipients/${id}`,{consent_status:'REVOKED'});await loadSettings();}catch(err){setRecipientError(err.message);}}
-  const sourceList=sources?.sources ? Object.entries(sources.sources) : [];
+  const sourceList=sources?.sources ? Object.entries(sources.sources).filter(([,s])=>!['ROADMAP','REFERENCE_NOT_BUNDLED'].includes(s.status)) : [];
+  const healthRows=system ? [
+    ['API',system.api||'online'],
+    ['Database',system.database_storage ? system.database_storage.backend+' · '+system.database_storage.storage.replaceAll('_',' ') : 'Unavailable'],
+    ['Weather',selected?.data_state==='CURRENT'?'Current':selected?.data_state==='STALE'?'Stale':'Unavailable'],
+    ['Terrain',selected?.slope!=null?'Available':'Unavailable'],
+    ['Alerts',String(system.unacknowledged_alerts??0)],
+    ['Authentication',auth?.auth_required?'Protected':'Open']
+  ] : [];
   return <div>{system?.database_storage?.warning&&<div className="notice notice-warn"><strong>Database storage needs attention.</strong><span>{system.database_storage.warning}</span></div>}<div className="page-title"><div><h1>Data & Settings</h1><p>Source provenance, system health, authorization and external alert delivery.</p></div></div>
     <div className="settings-grid">
       <Panel title="Data sources" subtitle="Origin and operational status are shown explicitly."><div className="source-table" role="table">{sourceList.map(([id,s])=><div className="source-row" key={id}><div><strong>{s.name}</strong><span>{s.kind}</span></div><StateBadge state={s.status}/><div><span>{s.coverage}</span><small>{s.spatial_resolution}</small></div><a href={s.origin?.startsWith('http')?s.origin:undefined} target="_blank" rel="noreferrer">{s.origin}</a></div>)}</div><p className="fine">{sources?.policy}</p></Panel>
-      <Panel title="System health"><div className="status-grid">{system?Object.entries(system).filter(([k])=>!['last_sync'].includes(k)).slice(0,14).map(([k,v])=><div key={k}><span>{k.replaceAll('_',' ')}</span><strong>{k==='database_storage'?`${v.backend} · ${v.storage.replaceAll('_',' ')}`:typeof v==='boolean'?(v?'Yes':'No'):String(v)}</strong></div>):<Loading/>}</div></Panel>
+      <Panel title="System health"><div className="status-grid">{system?healthRows.map(([k,v])=><div key={k}><span>{k}</span><strong>{v}</strong></div>):<Loading/>}</div></Panel>
       <Panel title="Admin portal session" subtitle={auth?.auth_required?'Protected admin session.':'Admin session'}><div className="session-card"><span className="session-role"><Icon name="shield" size={18}/><strong>{auth?.current_role||session?.portal||'ADMIN'}</strong></span><div><span>Portal</span><strong>Administration & Command Center</strong></div><div><span>Scope</span><strong>All monitored areas</strong></div><button className="btn btn-secondary small" onClick={onLogout}><Icon name="logout" size={15}/> Sign out</button></div></Panel>
-      <Panel title="Notification channels" subtitle="Configuration status; delivery is confirmed by Twilio receipts."><div className="channel-list">{channels?Object.entries(channels).filter(([k])=>!['policy','status_callback','active_recipients'].includes(k)).map(([k,v])=><span key={k}><strong>{k}</strong>: {v.status} · {v.delivery}{v.opted_in_recipients!=null?` · ${v.opted_in_recipients} opted in`:''}</span>):<Loading/>}</div>{channels&&<div className="notification-summary"><span>Active recipients <strong>{channels.active_recipients??0}</strong></span><span>Status callback <strong>{channels.status_callback?'Configured':'Not configured'}</strong></span></div>}{!!channels?.sms?.issues?.length&&<div className="notice notice-warn"><strong>SMS unavailable</strong><ul>{channels.sms.issues.map(issue=><li key={issue}>{issue}</li>)}</ul></div>}<p className="fine">{channels?.policy}</p></Panel>
+      <Panel title="Notification channels" subtitle="Configuration status; delivery is confirmed by Twilio receipts."><div className="channel-list">{channels?Object.entries(channels).filter(([k])=>!['policy','status_callback','active_recipients'].includes(k)).map(([k,v])=><span key={k}><strong>{k}</strong>: {v.status} · {v.delivery}{v.opted_in_recipients!=null?` · ${v.opted_in_recipients} opted in`:''}</span>):<Loading/>}</div>{channels&&<div className="notification-summary"><span>Active recipients <strong>{channels.active_recipients??0}</strong></span><span>Status callback <strong>{channels.status_callback?'Configured':'Not configured'}</strong></span></div>}{!!channels?.sms?.issues?.length&&<div className="notice notice-warn"><strong>SMS unavailable</strong><span>The external SMS channel is not currently active.</span></div>}<p className="fine">{channels?.policy}</p></Panel>
     </div>
 
     <Panel title="Civilian SMS registry" subtitle="Field officers register opted-in civilians by posting; admins retain oversight and emergency correction access." className="recipient-panel">
