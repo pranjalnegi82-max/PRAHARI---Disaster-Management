@@ -115,7 +115,7 @@ function RiskMapView({locations, selected, onSelect, basemap='street', compact=f
     ? {url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr:'Tiles © Esri — visual basemap only'}
     : {url:'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attr:'© OpenStreetMap contributors'};
   return <div className={`map-wrap ${compact ? 'map-compact' : ''}`}>
-    <MapContainer center={[25.6, 92.7]} zoom={5} scrollWheelZoom={!compact} className="map-canvas">
+    <MapContainer center={[23.5, 80.5]} zoom={4} scrollWheelZoom={!compact} className="map-canvas">
       <TileLayer url={tiles.url} attribution={tiles.attr}/>
       <MapFocus location={selected}/>
       {locations.map(loc => <CircleMarker key={loc.id} center={[loc.lat, loc.lon]} radius={loc.id===selected?.id ? 12 : 9}
