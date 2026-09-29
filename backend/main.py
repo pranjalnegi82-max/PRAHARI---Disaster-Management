@@ -2354,29 +2354,14 @@ def ingest_telemetry(t:TelemetryInput, role:str=Depends(resolve_role)):
                       'model_version':BASELINE_VERSION,'missing_inputs':baseline.missing,'factors':baseline.reasons,'limitations':baseline.limitations},
         'draft_advisory_created':bool(draft or fused_draft),
         'alert':localized_alert(fused_draft or draft,'en') if (fused_draft or draft) else None,
-        'note':'SIMULATED_HACKATHON and MANUAL_TEST telemetry are stored for demo/testing but cannot escalate live advisories.'
+        'note':'Only REAL_SENSOR telemetry can influence live advisory escalation.'
     }
 
 @app.get('/api/iot/telemetry/latest', tags=['Edge & IoT'])
 def latest_iot(location_id:int=Query(...)):
     _loc(location_id); row=latest_telemetry(location_id)
-    return {'location_id':location_id,'available':bool(row),'telemetry':row,'note':'REAL_SENSOR is live field telemetry; SIMULATED_HACKATHON is explicitly demo data.'}
+    return {'location_id':location_id,'available':bool(row),'telemetry':row,'note':'Only REAL_SENSOR telemetry can influence live advisory escalation.'}
 
-@app.post('/api/iot/demo/{location_id}', tags=['Edge & IoT'])
-def demo_iot(location_id:int, role:str=Depends(resolve_role)):
-    require_role(role,'OPERATOR')
-    x=_loc(location_id)
-    # Explicit synthetic demonstration packet. It is stored as SIMULATED_HACKATHON and is excluded from live escalation.
-    replay=build_replay_packet(x)
-    rain=float(replay.get('rainfall_24h_mm') or 0)
-    wet=float(replay.get('soil_moisture_proxy_pct') or 0)
-    severity=max(0.0,min(1.0,(rain/200.0 + wet/100.0 + x['slope']/60.0)/3.0))
-    t=TelemetryInput(location_id=location_id,station_id=f"DEMO-{location_id:02d}",rainfall_intensity=round(max(2,rain/8),1),soil_moisture=wet,
-        tilt_deg=round(.4+severity*2.7,2),vibration_g=round(.05+severity*.38,3),pore_pressure_kpa=round(18+severity*68,1),
-        displacement_mm=round(.7+severity*10.5,2),battery_pct=94,quality=.96,source='SIMULATED_HACKATHON')
-    result=ingest_telemetry(t, role)
-    result['demo_mode']='SYNTHETIC_DEMONSTRATION'
-    return result
 
 @app.post('/api/geotech/factor-of-safety', tags=['Physics guardrail'])
 def factor_of_safety(g:GeoTechInput):
