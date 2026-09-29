@@ -1,3 +1,9 @@
+# v10 / SIH26192 update
+
+The current flash flood workflow and its data boundaries are documented in [SIH26192_IMPLEMENTATION.md](SIH26192_IMPLEMENTATION.md). Flash flood configuration, screening, gauges and assessment history are separate from the preserved landslide modules described below.
+
+---
+
 # PRAHARI v9 Feature Status
 
 | Capability | Status | What is true now |

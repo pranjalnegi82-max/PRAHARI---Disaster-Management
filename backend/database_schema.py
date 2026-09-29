@@ -94,6 +94,16 @@ def initialize_schema(connect):
             UNIQUE(alert_id,recipient_id,channel)
         )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_notification_deliveries_alert ON notification_deliveries(alert_id,channel,status)")
+        cur.execute("""CREATE TABLE IF NOT EXISTS flood_basins(
+            location_id INTEGER PRIMARY KEY, config_json TEXT NOT NULL, updated_at INTEGER NOT NULL)""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS flood_gauges(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER NOT NULL,
+            source TEXT NOT NULL, observed_at INTEGER NOT NULL, payload_json TEXT NOT NULL)""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS flood_assessments(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, location_id INTEGER NOT NULL,
+            result_json TEXT NOT NULL, created_at INTEGER NOT NULL, alert_id INTEGER)""")
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_flood_gauges ON flood_gauges(location_id,source,observed_at)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_flood_assessments ON flood_assessments(location_id,id)')
         from broadcasts import initialize_broadcast_schema
         initialize_broadcast_schema(cur)
         con.commit()

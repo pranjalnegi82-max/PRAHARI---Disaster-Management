@@ -54,7 +54,7 @@ DB = DB_PATH
 TILE_CACHE = BASE / "tile_cache" / "nasa"
 TILE_CACHE.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="PRAHARI Command Center API", version="9.6.1", description="Traceable landslide risk assessment with separate admin and field-officer portals for SIH26001")
+app = FastAPI(title="PRAHARI Command Center API", version="10.0.0", description="Traceable landslide risk assessment with separate admin and field-officer portals for SIH26192")
 app.add_middleware(GZipMiddleware, minimum_size=700)
 app.add_middleware(
     CORSMiddleware,
@@ -185,6 +185,22 @@ def _sum_indices(values, indices):
             pass
     return round(total, 1)
 
+def _complete_rain_window(values, indices, count, times=None):
+    """Missing/invalid provider hours must never become zero rainfall."""
+    from flood_risk import number
+    if len(indices) != count:
+        return None
+    if times is not None:
+        try:
+            stamps = [datetime.fromisoformat(times[i]) for i in indices]
+            if any((b-a).total_seconds() != 3600 for a,b in zip(stamps, stamps[1:])):
+                return None
+        except (ValueError, IndexError, TypeError):
+            return None
+    samples = [number(values[i]) if i < len(values) else None for i in indices]
+    return round(sum(samples), 2) if all(v is not None for v in samples) else None
+
+
 def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
     """Small retry wrapper for public weather APIs.
 
@@ -195,7 +211,7 @@ def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
     last_error=None
     for attempt in range(max(1, attempts)):
         try:
-            req=UrlRequest(url, headers={'User-Agent':'PRAHARI-SIH26001/9.5 (+https://prahari-sih26001-pranjal.onrender.com)'})
+            req=UrlRequest(url, headers={'User-Agent':'PRAHARI-SIH26192/10.0'})
             with urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode('utf-8'))
         except HTTPError as exc:
@@ -251,6 +267,11 @@ def fetch_live_weather(x, force=False, data_override=None):
                 (past_idx if dt <= cur_dt else future_idx).append(i)
             except Exception:
                 pass
+        # The first forecast hour and latest history hour must abut current time.
+        if future_idx and (datetime.fromisoformat(times[future_idx[0]]) - cur_dt).total_seconds() > 3600:
+            future_idx = []
+        if past_idx and (cur_dt - datetime.fromisoformat(times[past_idx[-1]])).total_seconds() >= 3600:
+            past_idx = []
         past_idx_all = list(past_idx)
         past_idx_6h = past_idx_all[-6:]
         past_idx_24h = past_idx_all[-24:]
@@ -319,6 +340,7 @@ def fetch_live_weather(x, force=False, data_override=None):
             'source_url': 'https://open-meteo.com/',
             'updated_at': int(time.time()),
             'valid_time': cur_iso,
+            'valid_at_epoch': (int(cur_dt.timestamp()) if cur_dt.tzinfo else int(cur_dt.replace(tzinfo=timezone.utc).timestamp()) - int(data.get('utc_offset_seconds',0))) if cur_iso else None,
             'latitude': data.get('latitude',x['lat']),
             'longitude': data.get('longitude',x['lon']),
             'elevation_model_m': data.get('elevation'),
@@ -333,11 +355,13 @@ def fetch_live_weather(x, force=False, data_override=None):
             'soil_moisture_proxy_pct': soil_proxy,
             'rainfall_6h_mm': _sum_indices(precip,past_idx_6h),
             'rainfall_24h_mm': _sum_indices(precip,past_idx_24h),
-            'antecedent_rainfall_72h_mm': _sum_indices(precip,past_idx_72h),
+            'antecedent_rainfall_72h_mm': _complete_rain_window(precip,past_idx_72h,72,times),
             'cumulative_rainfall_7d_mm': cumulative_rainfall_7d,
             'effective_rainfall_11d_mm': effective_rainfall_11d,
             'max_hourly_rain_24h_mm': max_hourly_rain_24h,
-            'rain_forecast_6h_mm': _sum_indices(precip,future_idx[:6]),
+            'rain_forecast_1h_mm': _complete_rain_window(precip,future_idx[:1],1,times),
+            'rain_forecast_3h_mm': _complete_rain_window(precip,future_idx[:3],3,times),
+            'rain_forecast_6h_mm': _complete_rain_window(precip,future_idx[:6],6,times),
             'rain_forecast_24h_mm': _sum_indices(precip,future_idx[:24]),
             'rain_forecast_48h_mm': _sum_indices(precip,future_idx[:48]),
             'rain_forecast_72h_mm': _sum_indices(precip,future_idx[:72]),
@@ -964,7 +988,7 @@ def search_sentinel2_scenes(x:dict, days:int=120, max_cloud:float=45.0, limit:in
     req=UrlRequest(
         EARTH_SEARCH_STAC+'/search',
         data=json.dumps(payload).encode('utf-8'),
-        headers={'Content-Type':'application/json','Accept':'application/geo+json','User-Agent':'PRAHARI-SIH26001/9.6'},
+        headers={'Content-Type':'application/json','Accept':'application/geo+json','User-Agent':'PRAHARI-SIH26192/10.0'},
         method='POST'
     )
     try:
@@ -1189,7 +1213,7 @@ def startup_seed():
 
 @app.get("/")
 def root():
-    return {"service":"PRAHARI","status":"ok","version":"9.6.1","mode":"traceable-advisory-decision-support"}
+    return {"service":"PRAHARI","status":"ok","version":"10.0.0","mode":"traceable-advisory-decision-support"}
 
 
 @app.get("/api/system/status")
@@ -2421,7 +2445,7 @@ def _fetch_tile(date,z,y,x,timeout=4):
     path=_tile_path(date,z,y,x)
     if path.exists() and path.stat().st_size>500: return path,False
     path.parent.mkdir(parents=True,exist_ok=True)
-    req=Request(_nasa_url(date,z,y,x),headers={'User-Agent':'PRAHARI-SIH26001/7.0'})
+    req=Request(_nasa_url(date,z,y,x),headers={'User-Agent':'PRAHARI-SIH26192/10.0'})
     with urlopen(req,timeout=timeout) as resp:
         data=resp.read(2_000_000)
         ctype=(resp.headers.get('Content-Type') or '').lower()
@@ -2498,7 +2522,7 @@ def research_evidence_matrix():
 @app.get('/api/system/health', tags=['System'])
 def system_health_v8():
     st=ml_status(); cache=_cache_status(6); con=db(); tele=con.execute('SELECT COUNT(*) n FROM telemetry').fetchone()['n']; con.close()
-    return {'project':'PRAHARI','api_version':'8.0.0','status':'READY','ml_engine':st.get('engine'),'ml_loaded':st.get('model_loaded'),
+    return {'project':'PRAHARI','api_version':'10.0.0','status':'READY','ml_engine':st.get('engine'),'ml_loaded':st.get('model_loaded'),
             'weather':'LIVE_OR_TRANSPARENT_FALLBACK','satellite':{'offline_lite':'READY','local_nasa_cache_pct':cache['ready_pct'],'nasa_direct':'OPTIONAL'},
             'edge_iot':{'ingest_api':'READY','telemetry_records':tele},'people_centred_ews':'READY','impact_based_warning':'READY','offline_response_graph':'READY'}
 
@@ -2528,3 +2552,7 @@ def geofence_check(lat:float=Query(...,ge=-90,le=90), lon:float=Query(...,ge=-18
 
 from broadcast_api import routes as broadcast_routes
 app.include_router(broadcast_routes(db, LOCATIONS, _alert_broadcast_text))
+
+
+from flood_api import routes as flood_routes
+app.include_router(flood_routes(db, LOCATIONS, lambda x: fetch_live_weather(x), build_replay_packet, localized_alert))
