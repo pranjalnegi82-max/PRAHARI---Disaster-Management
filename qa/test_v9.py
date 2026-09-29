@@ -31,6 +31,9 @@ def clean_db(monkeypatch):
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
     main.LIVE_WEATHER_CACHE.clear()
+    fixture = main.build_replay_packet(main.LOCATIONS[0])
+    fixture.update({'availability':'CURRENT','live':True,'source':'QA live provider fixture','valid_time':'2026-09-29T12:00','valid_at_epoch':int(main.time.time()),'updated_at':int(main.time.time())})
+    monkeypatch.setattr(main, 'fetch_live_weather', lambda x, **kwargs: dict(fixture, location_id=x['id'], location=f"{x['name']}, {x['state']}"))
     yield
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
@@ -42,15 +45,8 @@ def client():
     return TestClient(main.app)
 
 
-def test_replay_is_explicit_and_assessable(client):
-    r = client.get("/api/live/locations/1?mode=replay")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["data_state"] == "HISTORICAL_REPLAY"
-    assert body["assessment_status"] == "ASSESSED"
-    assert body["risk_probability"] is None
-    assert body["risk_percent"] is not None
-    assert any(s["state"] == "HISTORICAL_REPLAY" for s in body["sources"])
+def test_replay_mode_is_rejected(client):
+    assert client.get('/api/live/locations/1?mode=live').status_code == 422
 
 
 def test_provider_failure_is_missing_not_low(monkeypatch, client):
@@ -86,11 +82,11 @@ def test_stale_real_packet_is_labeled_stale(monkeypatch, client):
 
 
 def test_invalid_location_returns_404(client):
-    assert client.get("/api/live/locations/999?mode=replay").status_code == 404
+    assert client.get("/api/live/locations/999").status_code == 404
 
 
 def test_assessment_persists_and_exports(client):
-    r = client.post("/api/assessments/1?mode=replay")
+    r = client.post("/api/assessments/1?mode=live")
     assert r.status_code == 200
     aid = r.json()["assessment_id"]
     history = client.get("/api/assessments/1/history").json()
@@ -98,7 +94,7 @@ def test_assessment_persists_and_exports(client):
     exported = client.get(f"/api/assessment-records/{aid}/export?format=json")
     assert exported.status_code == 200
     out = exported.json()
-    assert out["mode"] == "replay"
+    assert out["mode"] == "live"
     assert out["risk_index"] is not None
     assert out["sources"]
     with sqlite3.connect(TEST_DB) as con:
@@ -106,11 +102,11 @@ def test_assessment_persists_and_exports(client):
 
 
 def test_duplicate_draft_alert_is_prevented(client):
-    one = client.post("/api/assessments/1?mode=replay")
-    two = client.post("/api/assessments/1?mode=replay")
+    one = client.post("/api/assessments/1?mode=live")
+    two = client.post("/api/assessments/1?mode=live")
     assert one.status_code == two.status_code == 200
     alerts = client.get("/api/alerts").json()
-    matching = [a for a in alerts if a["source"] == "assessment-replay" and a["location_id"] == 1]
+    matching = [a for a in alerts if a["source"] == "assessment-live" and a["location_id"] == 1]
     assert len(matching) == 1
     assert matching[0]["lifecycle_status"] == "DRAFT"
     assert not matching[0]["public_warning_issued"]
@@ -123,7 +119,7 @@ def test_alert_lifecycle_and_authorization_boundary(monkeypatch, client):
     auth.REVIEWER_KEY = "reviewer-test"
     auth.ADMIN_KEY = "admin-test"
     try:
-        created = client.post("/api/assessments/1?mode=replay", headers={"X-PRAHARI-Key":"operator-test"})
+        created = client.post("/api/assessments/1?mode=live", headers={"X-PRAHARI-Key":"operator-test"})
         assert created.status_code == 200
         alert = client.get("/api/alerts").json()[0]
         aid = alert["id"]
@@ -172,14 +168,8 @@ def test_report_persists_and_requires_operator_for_status(monkeypatch, client):
         auth.AUTH_REQUIRED = False
 
 
-def test_simulated_iot_cannot_escalate_live_alert(client):
-    before = len(client.get("/api/alerts").json())
-    r = client.post("/api/iot/demo/1")
-    assert r.status_code == 200
-    assert r.json()["source"] == "SIMULATED_HACKATHON"
-    assert r.json()["draft_advisory_created"] is False
-    after = len(client.get("/api/alerts").json())
-    assert after == before
+def test_demo_iot_endpoint_is_removed(client):
+    assert client.post('/api/iot/demo/1').status_code == 404
 
 
 def test_satellite_endpoint_does_not_claim_model_inference(client, monkeypatch):
@@ -194,7 +184,7 @@ def test_satellite_endpoint_does_not_claim_model_inference(client, monkeypatch):
 
 
 def _make_reviewed_alert(client):
-    created = client.post('/api/assessments/1?mode=replay')
+    created = client.post('/api/assessments/1?mode=live')
     assert created.status_code == 200
     alert = client.get('/api/alerts').json()[0]
     aid = alert['id']
