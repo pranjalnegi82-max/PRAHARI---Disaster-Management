@@ -147,6 +147,33 @@ def _load_source_cache(cache_key:str):
     except Exception:
         return None
 
+def _load_source_cache_map(cache_keys):
+    """Load many persisted provider packets with one database connection."""
+    keys=[str(x) for x in cache_keys if x]
+    if not keys:
+        return {}
+    con=None
+    try:
+        placeholders=','.join('?' for _ in keys)
+        con=db()
+        rows=con.execute(
+            f"SELECT * FROM source_cache WHERE cache_key IN ({placeholders})",
+            tuple(keys),
+        ).fetchall()
+        con.close()
+        con=None
+        out={}
+        for row in rows:
+            d=dict(row)
+            d['payload']=json.loads(d.pop('payload_json'))
+            out[d['cache_key']]=d
+        return out
+    except Exception:
+        if con is not None:
+            try: con.close()
+            except Exception: pass
+        return {}
+
 def _sum_indices(values, indices):
     total = 0.0
     for i in indices:
@@ -468,25 +495,32 @@ def enrich_with_live(x, packet, telemetry_row=None, load_telemetry=True):
     return d
 
 def locs():
+    cache_keys=[_cache_key_weather(x['id']) for x in LOCATIONS]
+    persisted = _load_source_cache_map(cache_keys)
     telemetry = latest_telemetry_map([x['id'] for x in LOCATIONS]) if 'latest_telemetry_map' in globals() else {}
     return [
         enrich_with_live(
             x,
-            _missing_or_cached_packet(x, 'Live data not loaded'),
+            _missing_or_cached_packet(
+                x,
+                'Live data not loaded',
+                persisted_cache=persisted.get(_cache_key_weather(x['id'])),
+                load_persisted=False,
+            ),
             telemetry_row=telemetry.get(x['id']),
             load_telemetry=False,
         )
         for x in LOCATIONS
     ]
 
-def _missing_or_cached_packet(x, error_message:str):
+def _missing_or_cached_packet(x, error_message:str, persisted_cache=None, load_persisted=True):
     """Return a real cached packet when fresh enough, otherwise explicit MISSING."""
     now=int(time.time())
     candidates=[]
     mem=LIVE_WEATHER_CACHE.get(x['id'])
     if mem and mem.get('packet'):
         candidates.append({'packet':mem['packet'],'fetched_at':mem.get('cached_at',0)})
-    persisted=_load_source_cache(_cache_key_weather(x['id']))
+    persisted=_load_source_cache(_cache_key_weather(x['id'])) if load_persisted else persisted_cache
     if persisted:
         candidates.append({'packet':persisted['payload'],'fetched_at':persisted.get('fetched_at',0)})
     candidates.sort(key=lambda z:z.get('fetched_at',0), reverse=True)
@@ -548,8 +582,15 @@ def live_locs(force=False, mode='live'):
             packets[x['id']]=fetch_live_weather(x, force=True, data_override=item)
     except Exception as exc:
         err=f'{type(exc).__name__}: {exc}'
+        cache_keys=[_cache_key_weather(x['id']) for x in LOCATIONS]
+        persisted=_load_source_cache_map(cache_keys)
         for x in LOCATIONS:
-            packets[x['id']]=_missing_or_cached_packet(x, err)
+            packets[x['id']]=_missing_or_cached_packet(
+                x,
+                err,
+                persisted_cache=persisted.get(_cache_key_weather(x['id'])),
+                load_persisted=False,
+            )
 
     telemetry = latest_telemetry_map([x['id'] for x in LOCATIONS]) if 'latest_telemetry_map' in globals() else {}
     data=[
