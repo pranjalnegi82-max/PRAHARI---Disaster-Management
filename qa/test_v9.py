@@ -23,6 +23,22 @@ os.environ["PRAHARI_AUTH_REQUIRED"] = "false"
 import main  # noqa: E402
 REAL_FETCH_LIVE_WEATHER = main.fetch_live_weather
 
+def live_packet(location_id=1, name='Shimla', state='Himachal Pradesh'):
+    now=int(main.time.time())
+    return {
+        'availability':'CURRENT','live':True,'stale_public':False,'location_id':location_id,
+        'location':f'{name}, {state}','source':'QA live provider fixture','source_url':None,
+        'updated_at':now,'valid_time':'2026-09-29T12:00','valid_at_epoch':now,
+        'temperature_c':18,'humidity':82,'precipitation_now_mm':1.2,'rain_now_mm':1.2,
+        'cloud_cover_pct':90,'wind_kmh':8,'wind_gust_kmh':16,'soil_moisture_m3m3':0.36,
+        'soil_moisture_proxy_pct':82,'rainfall_6h_mm':32,'rainfall_24h_mm':125,
+        'antecedent_rainfall_72h_mm':280,'cumulative_rainfall_7d_mm':470,
+        'effective_rainfall_11d_mm':390,'max_hourly_rain_24h_mm':24,
+        'rain_forecast_1h_mm':12,'rain_forecast_3h_mm':32,'rain_forecast_6h_mm':58,
+        'rain_forecast_24h_mm':92,'rain_forecast_48h_mm':120,'rain_forecast_72h_mm':155,
+        'max_rain_probability_24h':85,'forecast':[]
+    }
+
 
 @pytest.fixture(autouse=True)
 def clean_db(monkeypatch):
@@ -32,8 +48,9 @@ def clean_db(monkeypatch):
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
     main.LIVE_WEATHER_CACHE.clear()
-    fixture = main.build_replay_packet(main.LOCATIONS[0])
-    fixture.update({'availability':'CURRENT','live':True,'source':'QA live provider fixture','valid_time':'2026-09-29T12:00','valid_at_epoch':int(main.time.time()),'updated_at':int(main.time.time())})
+    fixture = live_packet()
+    monkeypatch.setitem(main.LOCATIONS[0], 'slope', 42)
+    monkeypatch.setitem(main.LOCATIONS[0], 'elevation', 2200)
     monkeypatch.setattr(main, 'fetch_live_weather', lambda x, **kwargs: dict(fixture, location_id=x['id'], location=f"{x['name']}, {x['state']}"))
     yield
     main.LIVE_REGIONAL_CACHE["data"] = None
@@ -69,11 +86,8 @@ def test_provider_failure_is_missing_not_low(monkeypatch, client):
 def test_stale_real_packet_is_labeled_stale(monkeypatch, client):
     monkeypatch.setattr(main, 'fetch_live_weather', REAL_FETCH_LIVE_WEATHER)
     now = int(main.time.time())
-    packet = main.build_replay_packet(main.LOCATIONS[0])
-    packet.update({
-        "availability": "CURRENT", "live": True, "source": "Open-Meteo test packet",
-        "updated_at": now, "valid_time": "2026-09-16T12:00",
-    })
+    packet = live_packet()
+    packet.update({"source":"Open-Meteo test packet","updated_at":now,"valid_time":"2026-09-16T12:00"})
     main.LIVE_WEATHER_CACHE[1] = {"packet": packet, "cached_at": now}
     def fail(*args, **kwargs):
         raise main.URLError("offline")
@@ -176,7 +190,7 @@ def test_demo_iot_endpoint_is_removed(client):
 
 
 def test_satellite_endpoint_does_not_claim_model_inference(client, monkeypatch):
-    monkeypatch.setattr(main, "fetch_live_weather", lambda x, **kwargs: main.build_replay_packet(x))
+    monkeypatch.setattr(main, "fetch_live_weather", lambda x, **kwargs: live_packet(x["id"], x["name"], x["state"]))
     r = client.get("/api/satellite/1")
     assert r.status_code == 200
     body = r.json()
