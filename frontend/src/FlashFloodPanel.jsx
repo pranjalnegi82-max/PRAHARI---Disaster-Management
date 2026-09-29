@@ -74,8 +74,9 @@ export default function FlashFloodPanel({selected, readOnly=false, onRefreshAler
   async function saveConfig(e){
     e.preventDefault();setBusy(true);setError('');setNotice('');
     try{
-      const thresholds=[form.t1,form.t3,form.t6].map(Number);
-      const hasCore=form.provenance.trim() && form.villageName.trim() && thresholds.every(Number.isFinite);
+      const thresholdText=[form.t1,form.t3,form.t6].map(v=>String(v).trim());
+      const thresholds=thresholdText.map(Number);
+      const hasCore=!!form.provenance.trim() && !!form.villageName.trim() && thresholdText.every(Boolean) && thresholds.every(Number.isFinite);
       const hasGauge=form.stationId.trim() || form.dangerStage!=='';
       const body={
         name:form.name.trim()||`${selected.name} catchment`,
