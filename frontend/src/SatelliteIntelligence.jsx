@@ -153,44 +153,38 @@ export default function SatelliteIntelligence({ selected, searchScenes, SceneCar
     } catch (e) { if (!c.signal.aborted) setError(e.message); }
     finally { requests.current.delete(c); if (!c.signal.aborted) setStarting(false); }
   }
-  if (!selected) return <p>Select an area to view satellite intelligence.</p>;
+  if (!selected) return <p>Select an area to view satellite imagery.</p>;
   const pair = scenes?.pair;
   const steps = [
-    [!!scenes?.scene_count, 'Scene discovery', scenes?.scene_count ? `${scenes.scene_count} real L2A acquisitions` : 'No scenes loaded'],
-    [!!scenes?.scene_count, 'Scene metadata review', 'Acquisition dates and scene cloud cover only'],
-    [pair?.status === 'PAIR_READY', 'Visual scene pairing', pair?.status === 'PAIR_READY' ? 'Comparison available' : 'Suitable pair unavailable'],
-    [!!patch, '14-channel patch', patch ? 'Prepared for this location' : 'Not prepared'],
-    [!!result, 'Experimental inference', result ? 'Completed' : 'Not run'],
-    [!!result, 'Candidate polygons', result ? `${result.candidate_polygons?.features?.length || 0} polygons generated` : 'Not generated'],
+    [!!scenes?.scene_count, 'Scene discovery', scenes?.scene_count ? `${scenes.scene_count} Sentinel-2 acquisitions` : 'No scenes loaded'],
+    [pair?.status === 'PAIR_READY', 'Scene pairing', pair?.status === 'PAIR_READY' ? 'Comparison available' : 'Suitable pair unavailable'],
+    [!!patch, 'Analysis input', patch ? 'Prepared for this location' : 'Not prepared'],
+    [!!result, 'Post-event analysis', result ? 'Completed' : 'Not run'],
   ];
   return <section className="sat-intel sat-intel-focus">
-    <div className="sat-intel-head"><div><span className="eyebrow">Satellite intelligence</span><h2>{selected.name} · post-event review</h2><p>Review satellite acquisitions and experimental landslide candidates.</p></div>
-      <button className="btn btn-secondary" onClick={load} disabled={loading || busy}>{loading ? 'Checking…' : 'Refresh status & scenes'}</button></div>
-    <div className={`sat-readiness ${canInfer ? 'sat-available' : ''}`} role="status"><strong>{canInfer ? 'Experimental analysis available' : !model || !prep ? 'Checking analysis setup…' : 'AI analysis unavailable'}</strong>
-      <p>{canInfer ? 'Outputs require human review. Regional accuracy has not been established.' : 'Scene review and patch preparation are separate from model inference.'}</p></div>
-    <div className="sat-run-controls">
-      <label className="sat-consent"><input type="checkbox" checked={consent} disabled={busy} onChange={e => setConsent(e.target.checked)}/> I understand this is experimental research output, not an official warning.</label>
-      <div className="sat-buttons"><button className="btn btn-secondary" disabled={!prepReady || !consent || busy} onClick={() => start('prepare')}>Prepare patch</button>
-        <button className="btn btn-primary" disabled={!canInfer || !consent || busy} onClick={() => start('infer')}>Run segmentation</button></div>
-    </div>
-    {busy && <div className="sat-progress" role="status"><span className="pulse-dot"/><span>{job?.stage || 'Starting processing…'}</span><small>Switching areas hides this job; processing continues on the server.</small></div>}
-    {error && <div className="notice notice-error" role="alert">{error}</div>}
+    <div className="sat-intel-head"><div><span className="eyebrow">Sentinel-2 imagery</span><h2>{selected.name} · satellite review</h2><p>Recent optical satellite acquisitions for the selected monitoring area.</p></div>
+      <button className="btn btn-secondary" onClick={load} disabled={loading || busy}>{loading ? 'Refreshing…' : 'Refresh imagery'}</button></div>
+
+    {canInfer&&<><div className="sat-readiness sat-available" role="status"><strong>Post-event analysis available</strong><p>Candidate outputs require human review and are not public warnings.</p></div>
+      <div className="sat-run-controls">
+        <label className="sat-consent"><input type="checkbox" checked={consent} disabled={busy} onChange={e => setConsent(e.target.checked)}/> Enable reviewed research analysis for this scene.</label>
+        <div className="sat-buttons"><button className="btn btn-secondary" disabled={!prepReady || !consent || busy} onClick={() => start('prepare')}>Prepare analysis</button>
+          <button className="btn btn-primary" disabled={!consent || busy} onClick={() => start('infer')}>Run analysis</button></div>
+      </div></>}
+
+    {busy && <div className="sat-progress" role="status"><span className="pulse-dot"/><span>{job?.stage || 'Processing satellite data…'}</span></div>}
+    {error && canInfer && <div className="notice notice-error" role="alert">{error}</div>}
     {result && <Result selected={selected} result={result}/>}
-    {patch && !result && <div className="sat-result-panel"><h3>Patch prepared</h3><p>{patch.scene?.id} · {date(patch.scene?.datetime)}</p><p className="fine">128 × 128 × 14 research input. No detection has been performed. It can be reused for one hour while this service stays running.</p></div>}
-    <details className="disclosure"><summary>Analysis setup</summary><div className="disclosure-body">
-      <p><strong>Model:</strong> {model?.status || 'CHECKING'} · {model?.reason || (modelReady ? 'Checkpoint load and forward pass verified; training quality is not verified.' : 'Waiting for status.')}</p>
-      <p><strong>Patch preparation:</strong> {prepReady ? 'Runtime available' : prep?.runtime_error || 'Unavailable'}. This does not mean a patch has been prepared.</p>
-      <p><strong>Input profile:</strong> {prep?.input_profile_configured ? 'Configured' : prep?.input_profile_error || 'Unavailable'}</p>
-      {modelReady && prep?.input_profile_configured && !profileMatches && <p>The input profile belongs to a different model checkpoint.</p>}
-      {!prep?.experimental_fallback_allowed && <p>Experimental live preprocessing has not been enabled on the server.</p>}
-      <p>Live inference needs trained weights and their training-derived preprocessing settings. See SATELLITE_SETUP.md in the repository.</p>
-    </div></details>
-    <details className="disclosure" open={!result}><summary>Satellite scenes · visual comparison</summary><div className="disclosure-body">
-      {sceneError && <p className="notice notice-error">Catalog unavailable: {sceneError}</p>}
-      <p>{scenes ? `${scenes.scene_count || 0} L2A scenes found` : 'No scenes loaded'} · {pair?.status === 'PAIR_READY' ? 'Comparison pair ready' : 'Suitable pair unavailable'}</p>
-      <p>These L2A images are visual context. The inference patch uses a separately selected L1C acquisition; its actual date is shown with the result. A pair is not proof of change or a landslide.</p>
-      <div className="sat-scene-grid"><SceneCard scene={pair?.reference} label="Reference acquisition"/><SceneCard scene={pair?.recent} label="Recent acquisition"/></div>
-    </div></details>
-    <details className="disclosure"><summary>Processing stages</summary><div className="disclosure-body sat-pipeline">{steps.map(([done, title, detail], i) => <div className={`sat-step ${done ? 'done' : 'pending'}`} key={title}><strong>{i + 1}</strong><span>{title}<small>{detail}</small></span></div>)}</div></details>
+    {patch && !result && <div className="sat-result-panel"><h3>Analysis input ready</h3><p>{patch.scene?.id} · {date(patch.scene?.datetime)}</p></div>}
+
+    <section className="panel">
+      <div className="section-heading"><div><span className="eyebrow">Scene comparison</span><h3>Sentinel-2 acquisitions</h3></div><span className="section-meta">{scenes ? `${scenes.scene_count || 0} scenes` : 'Loading'}</span></div>
+      {sceneError && <p className="notice notice-error">Satellite catalog unavailable: {sceneError}</p>}
+      {pair?.status === 'PAIR_READY'
+        ? <div className="sat-scene-grid"><SceneCard scene={pair.reference} label="Reference acquisition"/><SceneCard scene={pair.recent} label="Recent acquisition"/></div>
+        : !loading && <p className="muted">No suitable comparison pair is currently available.</p>}
+    </section>
+
+    {canInfer&&<details className="disclosure"><summary>Processing status</summary><div className="disclosure-body sat-pipeline">{steps.map(([done, title, detail], i) => <div className={`sat-step ${done ? 'done' : 'pending'}`} key={title}><strong>{i + 1}</strong><span>{title}<small>{detail}</small></span></div>)}</div></details>}
   </section>;
 }

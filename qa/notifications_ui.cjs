@@ -130,7 +130,7 @@ async function run() {
 
     await page.getByRole('button', { name: 'Data & Settings', exact: true }).click();
     await page.getByText('SMS unavailable', { exact: true }).waitFor();
-    await page.getByText(setupIssue, { exact: true }).waitFor();
+    await page.getByText('The external SMS channel is not currently active.', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: path.join(out, 'sms-setup-SYNTHETIC.png'), fullPage: true });
     await page.getByRole('button',{name:'Reports & Alerts',exact:true}).click();
