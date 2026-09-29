@@ -36,7 +36,9 @@ def live_packet(location_id=1, name='Shimla', state='Himachal Pradesh'):
         'effective_rainfall_11d_mm':390,'max_hourly_rain_24h_mm':24,
         'rain_forecast_1h_mm':12,'rain_forecast_3h_mm':32,'rain_forecast_6h_mm':58,
         'rain_forecast_24h_mm':92,'rain_forecast_48h_mm':120,'rain_forecast_72h_mm':155,
-        'max_rain_probability_24h':85,'forecast':[]
+        'max_rain_probability_24h':85,'forecast':[],
+        'terrain_slope_deg':34.5,'terrain_elevation_m':2200.0,'terrain_local_relief_m':180.0,
+        'terrain_source':'QA terrain provider'
     }
 
 
@@ -49,8 +51,6 @@ def clean_db(monkeypatch):
     main.LIVE_REGIONAL_CACHE["ts"] = 0
     main.LIVE_WEATHER_CACHE.clear()
     fixture = live_packet()
-    monkeypatch.setitem(main.LOCATIONS[0], 'slope', 42)
-    monkeypatch.setitem(main.LOCATIONS[0], 'elevation', 2200)
     monkeypatch.setattr(main, 'fetch_live_weather', lambda x, **kwargs: dict(fixture, location_id=x['id'], location=f"{x['name']}, {x['state']}"))
     yield
     main.LIVE_REGIONAL_CACHE["data"] = None
@@ -100,6 +100,27 @@ def test_stale_real_packet_is_labeled_stale(monkeypatch, client):
 
 def test_invalid_location_returns_404(client):
     assert client.get("/api/live/locations/999").status_code == 404
+
+def test_provider_terrain_gradient_is_derived_from_real_elevation_samples():
+    location=main.LOCATIONS[0]
+    terrain=main._terrain_from_elevations(location,[2000,2100,1900,2050,1950])
+    assert terrain is not None
+    assert terrain['elevation_m'] == 2000.0
+    assert terrain['slope_deg'] > 0
+    assert terrain['local_relief_m'] == 200.0
+
+
+def test_browser_relay_terrain_completes_landslide_inputs(client):
+    payload=live_packet()
+    terrain={'slope_deg':32.0,'elevation_m':2100.0,'local_relief_m':140.0,'sample_spacing_m':1000}
+    response=client.post('/api/live/browser-relay/1',json={'provider':'OPEN_METEO','payload':payload,'terrain':terrain})
+    assert response.status_code == 200
+    body=response.json()
+    assert body['slope'] == 32.0
+    assert body['elevation'] == 2100.0
+    assert body['data_completeness_pct'] == 100.0
+    assert body['assessment_status'] == 'ASSESSED'
+
 
 def test_regional_live_list_uses_one_bulk_telemetry_lookup(monkeypatch):
     main.LIVE_REGIONAL_CACHE["data"] = None
