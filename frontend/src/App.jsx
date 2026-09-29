@@ -29,7 +29,7 @@ const fmtTime = (v) => {
 
 function Badge({children, tone='neutral'}) { return <span className={`badge badge-${tone}`}>{children}</span>; }
 function StateBadge({state}) {
-  const tone = state === 'CURRENT' ? 'good' : state === 'STALE' || state === 'HISTORICAL_REPLAY' ? 'warn' : state === 'MISSING' ? 'danger' : 'neutral';
+  const tone = state === 'CURRENT' ? 'good' : state === 'STALE' ? 'warn' : state === 'MISSING' ? 'danger' : 'neutral';
   return <Badge tone={tone}>{STATE_LABEL[state] || state || 'Unknown'}</Badge>;
 }
 function RiskBadge({level='UNKNOWN'}) {
@@ -261,7 +261,6 @@ function PortalApp(){
 
 function AdminPortal({session,onLogout}) {
   const [view, setView] = useState('Flash Floods');
-  const mode = 'live';
   const [locations, setLocations] = useState([]);
   const [selectedId, setSelectedId] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -486,66 +485,6 @@ function Meta({label,value}) { return <div className="meta"><span>{label}</span>
 function Metric({label,value,unit}) { return <div className="metric"><span>{label}</span><strong>{value}<small>{unit}</small></strong></div>; }
 function Attention({count,label,action}) { return <button className="attention" onClick={action}><span className={count?'count count-hot':'count'}>{count}</span><span>{label}</span><span aria-hidden="true">→</span></button>; }
 
-function summarizeSentinelScene(item) {
-  const props=item?.properties||{};
-  const links=item?.links||[];
-  const link=(rel)=>links.find(x=>x.rel===rel && x.href)?.href||null;
-  const assets=item?.assets||{};
-  const asset=(...names)=>{for(const name of names){if(assets?.[name]?.href)return assets[name].href;}return null;};
-  return {
-    id:item?.id,
-    datetime:props.datetime,
-    cloud_cover_pct:props['eo:cloud_cover'],
-    platform:props.platform,
-    thumbnail_url:link('thumbnail'),
-    stac_url:link('self'),
-    bbox:item?.bbox,
-    assets:{visual:asset('visual'),red:asset('red','B04'),nir:asset('nir','nir08','B08'),swir16:asset('swir16','B11'),swir22:asset('swir22','B12'),scl:asset('scl','SCL')}
-  };
-}
-
-function chooseSentinelPair(scenes) {
-  const valid=(scenes||[]).filter(x=>x.datetime).sort((a,b)=>new Date(b.datetime)-new Date(a.datetime));
-  if(!valid.length)return null;
-  const recent=valid[0], rdt=new Date(recent.datetime);
-  const candidates=valid.slice(1).filter(x=>(rdt-new Date(x.datetime))/86400000>=10);
-  if(!candidates.length)return {recent,reference:null,days_between:null,status:'REFERENCE_SCENE_NOT_FOUND'};
-  candidates.sort((a,b)=>{
-    const ca=a.cloud_cover_pct??999, cb=b.cloud_cover_pct??999;
-    if(ca!==cb)return ca-cb;
-    return Math.abs((rdt-new Date(a.datetime))/86400000-30)-Math.abs((rdt-new Date(b.datetime))/86400000-30);
-  });
-  const reference=candidates[0];
-  return {recent,reference,days_between:Math.round((rdt-new Date(reference.datetime))/86400000),status:'PAIR_READY'};
-}
-
-async function browserSentinel2Search(location,{days=120,maxCloud=45,limit=12,signal}={}) {
-  const end=new Date(), start=new Date(end.getTime()-days*86400000);
-  const pad=.15;
-  const body={
-    collections:['sentinel-2-l2a'],
-    bbox:[location.lon-pad,location.lat-pad,location.lon+pad,location.lat+pad],
-    datetime:`${start.toISOString()}/${end.toISOString()}`,
-    query:{'eo:cloud_cover':{lte:maxCloud}},
-    limit
-  };
-  const response=await fetch('https://earth-search.aws.element84.com/v1/search',{
-    method:'POST',headers:{'Content-Type':'application/json','Accept':'application/geo+json'},body:JSON.stringify(body),
-    signal:signal?AbortSignal.any([signal,AbortSignal.timeout(20000)]):AbortSignal.timeout(20000)
-  });
-  if(!response.ok)throw new Error(`Earth Search returned ${response.status}`);
-  const raw=await response.json();
-  const scenes=(raw.features||[]).map(summarizeSentinelScene).sort((a,b)=>new Date(b.datetime)-new Date(a.datetime));
-  const pair=chooseSentinelPair(scenes);
-  return {
-    status:scenes.length?'AVAILABLE':'NO_SCENES',provider:'Element 84 Earth Search',collection:'sentinel-2-l2a',
-    location_id:location.id,location:`${location.name}, ${location.state}`,searched_at:Date.now()/1000,
-    search_days:days,max_cloud_pct:maxCloud,scene_count:scenes.length,scenes,pair,
-    analysis_status:pair?.status==='PAIR_READY'?'SCENE_PAIR_READY':'SCENE_DISCOVERY_ONLY',
-    segmentation_status:'CHECK_MODEL_STATUS_ENDPOINT',transport:'BROWSER_DIRECT_STAC',
-    note:'Real Sentinel-2 scene metadata fetched directly from Earth Search. Scene pairing is quality control, not a landslide detection result.'
-  };
-}
 
 function SatelliteSceneCard({scene,label}) {
   if(!scene)return <div className="sat-scene-card sat-scene-empty"><strong>{label}</strong><span>No suitable scene found.</span></div>;
@@ -572,7 +511,7 @@ function RiskMapPage({locations,selected,onSelect,onAssess,assessment}) {
     </div>
 
     {basemap==='intelligence'
-      ? <SatelliteIntelligence key={selected?.id} selected={selected} searchScenes={browserSentinel2Search} SceneCard={SatelliteSceneCard}/>
+      ? <SatelliteIntelligence key={selected?.id} selected={selected} SceneCard={SatelliteSceneCard}/>
       : <div className="map-layout">
           <RiskMapView locations={locations} selected={selected} onSelect={onSelect} basemap={basemap}/>
           <aside className="map-detail">
