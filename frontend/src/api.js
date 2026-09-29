@@ -55,7 +55,15 @@ export async function request(path, options = {}) {
       try {
         const body = await response.json();
         const detail = body.detail || body.message;
-        if (detail) message = typeof detail === 'string' ? detail : JSON.stringify(detail);
+        if (detail) {
+          if (typeof detail === 'string') message = detail;
+          else if (Array.isArray(detail)) {
+            message = detail.map(item => {
+              const field = Array.isArray(item?.loc) ? item.loc.filter(x=>x!=='body').join(' → ') : '';
+              return field ? `${field}: ${item?.msg || 'Invalid value'}` : (item?.msg || 'Invalid value');
+            }).join(' · ');
+          } else message = detail.message || 'Request validation failed.';
+        }
       } catch { /* non-json response */ }
       const error = new Error(message);
       error.status = response.status;
