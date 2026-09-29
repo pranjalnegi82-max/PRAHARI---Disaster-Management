@@ -54,7 +54,7 @@ DB = DB_PATH
 TILE_CACHE = BASE / "tile_cache" / "nasa"
 TILE_CACHE.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="PRAHARI Command Center API", version="10.0.0", description="Traceable landslide risk assessment with separate admin and field-officer portals for SIH26192")
+app = FastAPI(title="PRAHARI Command Center API", version="10.0.0", description="Multi-source flash-flood and mountain-hazard decision support for hilly regions")
 app.add_middleware(GZipMiddleware, minimum_size=700)
 app.add_middleware(
     CORSMiddleware,
@@ -1262,12 +1262,12 @@ def locations():
 
 
 @app.get("/api/live/locations")
-def live_locations(force:bool=False, mode:Literal['live','replay']='live'):
+def live_locations(force:bool=False, mode:Literal['live']='live'):
     return live_locs(force=force, mode=mode)
 
 
 @app.get("/api/live/locations/{location_id}")
-def live_location(location_id:int, force:bool=False, mode:Literal['live','replay']='live'):
+def live_location(location_id:int, force:bool=False, mode:Literal['live']='live'):
     x = next((z for z in LOCATIONS if z['id']==location_id), None)
     if not x:
         raise HTTPException(404,"Location not found")
@@ -1345,7 +1345,7 @@ def _save_assessment(location_id:int, mode:str, result:dict) -> int:
     con.commit(); con.close(); return aid
 
 @app.post('/api/assessments/{location_id}')
-def run_assessment(location_id:int, mode:Literal['live','replay']='live', force:bool=False, role:str=Depends(resolve_role)):
+def run_assessment(location_id:int, mode:Literal['live']='live', force:bool=False, role:str=Depends(resolve_role)):
     require_role(role,'OPERATOR')
     x=next((z for z in LOCATIONS if z['id']==location_id),None)
     if not x: raise HTTPException(404,'Location not found')
@@ -1406,7 +1406,7 @@ def predict(inp: RiskInput):
             'risk_probability':None,'experimental_score_percent':round(p*100,1),'risk_percent':round(p*100,1),'risk_level':level,
             'recommended_action':action_for(level),'model_probabilities':result.get('model_probabilities',{}),'shap_local':result.get('shap_local',[]),
             'engine':result.get('engine'),'model_provenance':result.get('provenance'),
-            'limitations':['Synthetic/bootstrap training; not field-calibrated for Northeast India.','Score must not be described as an operational probability.'],
+            'limitations':['Synthetic/bootstrap training; not field-calibrated for hilly regions.','Score must not be described as an operational probability.'],
             'automatic_alert_triggered':False
         }
     base=baseline_assess({
@@ -2555,4 +2555,4 @@ app.include_router(broadcast_routes(db, LOCATIONS, _alert_broadcast_text))
 
 
 from flood_api import routes as flood_routes
-app.include_router(flood_routes(db, LOCATIONS, lambda x: fetch_live_weather(x), build_replay_packet, localized_alert))
+app.include_router(flood_routes(db, LOCATIONS, lambda x: fetch_live_weather(x), localized_alert))
