@@ -19,7 +19,7 @@ class Village(BaseModel):
 class Basin(BaseModel):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
     name: str = Field(min_length=2, max_length=150)
-    context_status: Literal['DEMO', 'CONFIGURED'] = 'DEMO'
+    context_status: Literal['CONFIGURED'] = 'CONFIGURED'
     provenance: str = Field(min_length=10, max_length=1000)
     thresholds_mm: dict[str, float]
     villages: list[Village] = Field(min_length=1, max_length=100)
@@ -49,7 +49,7 @@ class Gauge(BaseModel):
     observed_at: int = Field(gt=0)
 
 
-def routes(db, locations, weather, replay, localized_alert):
+def routes(db, locations, weather, localized_alert):
     router = APIRouter(prefix='/api/flood', tags=['Flash Floods · SIH26192'])
 
     def location(location_id):
@@ -63,10 +63,7 @@ def routes(db, locations, weather, replay, localized_alert):
         try: row = con.execute('SELECT config_json FROM flood_basins WHERE location_id=?', (location_id,)).fetchone()
         finally: con.close()
         if row: return json.loads(row['config_json'])
-        return Basin(name=f"{x['name']} demonstration catchment", provenance='Synthetic configuration for workflow demonstration; no surveyed catchment boundary.',
-            thresholds_mm={'1': 30, '3': 60, '6': 100},
-            villages=[Village(name=f"{x['name']} demo settlement", lat=x['lat'], lon=x['lon'])],
-            slope_context=f"Seed slope {x['slope']} degrees; not a slope stability calculation.").model_dump()
+        raise HTTPException(409, 'Catchment configuration required for this monitored area')
 
     @router.get('/basins/{location_id}')
     def basin_get(location_id: int):
@@ -97,28 +94,24 @@ def routes(db, locations, weather, replay, localized_alert):
         finally: con.close()
         return {'id': sid, 'accepted': True, 'note': 'Only fresh REAL_SENSOR packets with quality >= 0.8 can affect current screening.'}
 
-    def calculate(location_id, mode):
+    def calculate(location_id):
         x = location(location_id); basin = basin_for(location_id)
-        packet = dict(replay(x) if mode == 'replay' else weather(x))
-        if mode == 'replay':
-            # Synthetic storm fixture, never represented as a historical observed event.
-            packet.update(source='Synthetic flash flood scenario', rain_forecast_1h_mm=38,
-                          rain_forecast_3h_mm=82, rain_forecast_6h_mm=125)
+        packet = dict(weather(x))
         con = db()
         try:
             row = con.execute("SELECT payload_json FROM flood_gauges WHERE location_id=? AND source='REAL_SENSOR' ORDER BY observed_at DESC,id DESC LIMIT 1", (location_id,)).fetchone()
         finally: con.close()
-        result = assess(packet, basin, json.loads(row['payload_json']) if row and mode == 'live' else None, int(time.time()))
-        result.update(location_id=location_id, location=x['name'], mode=mode, created_at=int(time.time()))
+        result = assess(packet, basin, json.loads(row['payload_json']) if row else None, int(time.time()))
+        result.update(location_id=location_id, location=x['name'], mode='live', created_at=int(time.time()))
         return result
 
     @router.get('/screen/{location_id}')
-    def screen(location_id: int, mode: Literal['live', 'replay'] = 'live'):
-        return calculate(location_id, mode)
+    def screen(location_id: int):
+        return calculate(location_id)
 
     @router.post('/assessments/{location_id}', status_code=201)
-    def record(location_id: int, mode: Literal['live', 'replay'] = 'live', role: str = Depends(resolve_role)):
-        require_role(role, 'OPERATOR'); result = calculate(location_id, mode)
+    def record(location_id: int, role: str = Depends(resolve_role)):
+        require_role(role, 'OPERATOR'); result = calculate(location_id)
         con = db()
         try:
             aid = insert_row(con.cursor(), 'INSERT INTO flood_assessments(location_id,result_json,created_at) VALUES(?,?,?)',
@@ -145,7 +138,7 @@ def routes(db, locations, weather, replay, localized_alert):
     @router.post('/records/{assessment_id}/draft')
     def draft(assessment_id: int, role: str = Depends(resolve_role)):
         require_role(role, 'OPERATOR'); result = record_get(assessment_id)
-        if (result['mode'] != 'live' or result['data_state'] != 'CURRENT' or result['basin']['context_status'] != 'CONFIGURED'
+        if (result['data_state'] != 'CURRENT' or result['basin']['context_status'] != 'CONFIGURED'
                 or result['status'] != 'SCREENED' or result['level'] not in ('HIGH', 'CRITICAL')
                 or int(time.time()) - result['created_at'] > 900):
             raise HTTPException(409, 'Draft requires a complete, current, high/critical live assessment under 15 minutes old with a configured catchment.')
