@@ -54,43 +54,50 @@ DB = DB_PATH
 TILE_CACHE = BASE / "tile_cache" / "nasa"
 TILE_CACHE.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="PRAHARI Command Center API", version="10.0.0", description="Traceable landslide risk assessment with separate admin and field-officer portals for SIH26192")
+app = FastAPI(title="PRAHARI Command Center API", version="11.0.0", description="Multi-source flash-flood and hill-hazard monitoring for hilly regions of India")
 app.add_middleware(GZipMiddleware, minimum_size=700)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-PRAHARI-Key"],
 )
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS)), name="uploads")
 
 LOCATIONS = [
-    {"id":1,"name":"Gangtok","state":"Sikkim","lat":27.3314,"lon":88.6138,"rainfall":168,"soil_moisture":84,"slope":46,"elevation":1650,"historical_risk":0.82,"ndvi":0.61,"population_exposed":14200},
-    {"id":2,"name":"Aizawl","state":"Mizoram","lat":23.7271,"lon":92.7176,"rainfall":132,"soil_moisture":76,"slope":41,"elevation":1132,"historical_risk":0.72,"ndvi":0.67,"population_exposed":9700},
-    {"id":3,"name":"Kohima","state":"Nagaland","lat":25.6751,"lon":94.1086,"rainfall":95,"soil_moisture":62,"slope":34,"elevation":1444,"historical_risk":0.52,"ndvi":0.73,"population_exposed":6300},
-    {"id":4,"name":"Shillong","state":"Meghalaya","lat":25.5788,"lon":91.8933,"rainfall":82,"soil_moisture":58,"slope":29,"elevation":1525,"historical_risk":0.45,"ndvi":0.69,"population_exposed":5100},
-    {"id":5,"name":"Itanagar","state":"Arunachal Pradesh","lat":27.0844,"lon":93.6053,"rainfall":145,"soil_moisture":80,"slope":44,"elevation":320,"historical_risk":0.78,"ndvi":0.76,"population_exposed":11400},
-    {"id":6,"name":"Imphal East","state":"Manipur","lat":24.8170,"lon":93.9368,"rainfall":72,"soil_moisture":54,"slope":22,"elevation":786,"historical_risk":0.35,"ndvi":0.64,"population_exposed":3700},
-    {"id":7,"name":"Dima Hasao","state":"Assam","lat":25.1870,"lon":93.0250,"rainfall":154,"soil_moisture":79,"slope":43,"elevation":980,"historical_risk":0.76,"ndvi":0.71,"population_exposed":8200},
-    {"id":8,"name":"Unakoti","state":"Tripura","lat":24.3150,"lon":92.0670,"rainfall":61,"soil_moisture":49,"slope":18,"elevation":220,"historical_risk":0.24,"ndvi":0.70,"population_exposed":2400},
+    # Curated real place coordinates spanning major Indian hill systems. These
+    # records are only monitoring points; no synthetic hazard attributes are attached.
+    {"id":1,"name":"Gangtok","state":"Sikkim","country":"India","lat":27.3314,"lon":88.6138,"source":"CURATED_PLACE"},
+    {"id":2,"name":"Aizawl","state":"Mizoram","country":"India","lat":23.7271,"lon":92.7176,"source":"CURATED_PLACE"},
+    {"id":3,"name":"Kohima","state":"Nagaland","country":"India","lat":25.6751,"lon":94.1086,"source":"CURATED_PLACE"},
+    {"id":4,"name":"Shillong","state":"Meghalaya","country":"India","lat":25.5788,"lon":91.8933,"source":"CURATED_PLACE"},
+    {"id":5,"name":"Itanagar","state":"Arunachal Pradesh","country":"India","lat":27.0844,"lon":93.6053,"source":"CURATED_PLACE"},
+    {"id":6,"name":"Manali","state":"Himachal Pradesh","country":"India","lat":32.2396,"lon":77.1887,"source":"CURATED_PLACE"},
+    {"id":7,"name":"Shimla","state":"Himachal Pradesh","country":"India","lat":31.1048,"lon":77.1734,"source":"CURATED_PLACE"},
+    {"id":8,"name":"Nainital","state":"Uttarakhand","country":"India","lat":29.3919,"lon":79.4542,"source":"CURATED_PLACE"},
+    {"id":9,"name":"Joshimath","state":"Uttarakhand","country":"India","lat":30.5553,"lon":79.5650,"source":"CURATED_PLACE"},
+    {"id":10,"name":"Pithoragarh","state":"Uttarakhand","country":"India","lat":29.5829,"lon":80.2182,"source":"CURATED_PLACE"},
+    {"id":11,"name":"Dharamshala","state":"Himachal Pradesh","country":"India","lat":32.2190,"lon":76.3234,"source":"CURATED_PLACE"},
+    {"id":12,"name":"Srinagar","state":"Jammu and Kashmir","country":"India","lat":34.0837,"lon":74.7973,"source":"CURATED_PLACE"},
+    {"id":13,"name":"Leh","state":"Ladakh","country":"India","lat":34.1526,"lon":77.5771,"source":"CURATED_PLACE"},
+    {"id":14,"name":"Darjeeling","state":"West Bengal","country":"India","lat":27.0410,"lon":88.2663,"source":"CURATED_PLACE"},
+    {"id":15,"name":"Tawang","state":"Arunachal Pradesh","country":"India","lat":27.5861,"lon":91.8594,"source":"CURATED_PLACE"},
+    {"id":16,"name":"Haflong","state":"Assam","country":"India","lat":25.1648,"lon":93.0176,"source":"CURATED_PLACE"},
+    {"id":17,"name":"Munnar","state":"Kerala","country":"India","lat":10.0889,"lon":77.0595,"source":"CURATED_PLACE"},
+    {"id":18,"name":"Kalpetta","state":"Kerala","country":"India","lat":11.6087,"lon":76.0834,"source":"CURATED_PLACE"},
+    {"id":19,"name":"Ooty","state":"Tamil Nadu","country":"India","lat":11.4102,"lon":76.6950,"source":"CURATED_PLACE"},
+    {"id":20,"name":"Kodaikanal","state":"Tamil Nadu","country":"India","lat":10.2381,"lon":77.4892,"source":"CURATED_PLACE"},
+    {"id":21,"name":"Madikeri","state":"Karnataka","country":"India","lat":12.4244,"lon":75.7382,"source":"CURATED_PLACE"},
+    {"id":22,"name":"Mahabaleshwar","state":"Maharashtra","country":"India","lat":17.9307,"lon":73.6477,"source":"CURATED_PLACE"},
+    {"id":23,"name":"Mount Abu","state":"Rajasthan","country":"India","lat":24.5926,"lon":72.7156,"source":"CURATED_PLACE"},
+    {"id":24,"name":"Pachmarhi","state":"Madhya Pradesh","country":"India","lat":22.4674,"lon":78.4346,"source":"CURATED_PLACE"},
 ]
 
-ROUTES = [
-    {"id":1,"route":"NH-10: Rangpo → Gangtok","location_id":1,"status":"RESTRICTED","reason":"High slope saturation","priority":"CRITICAL"},
-    {"id":2,"route":"NH-54: Kolasib → Aizawl","location_id":2,"status":"CAUTION","reason":"Persistent rainfall","priority":"HIGH"},
-    {"id":3,"route":"NH-27: Haflong sector","location_id":7,"status":"RESTRICTED","reason":"Debris-flow susceptibility","priority":"HIGH"},
-    {"id":4,"route":"NH-2: Kohima approach","location_id":3,"status":"OPEN","reason":"Moderate monitoring","priority":"MODERATE"},
-    {"id":5,"route":"Shillong bypass","location_id":4,"status":"OPEN","reason":"Stable conditions","priority":"LOW"},
-]
-
-INFRA = [
-    {"type":"Village","name":"Upper Ranka cluster","location_id":1,"distance_km":1.8,"people":2100},
-    {"type":"School","name":"Hillview Senior Secondary","location_id":1,"distance_km":2.4,"people":640},
-    {"type":"Hospital","name":"District Referral Centre","location_id":2,"distance_km":3.2,"people":0},
-    {"type":"Bridge","name":"Haflong approach bridge","location_id":7,"distance_km":0.9,"people":0},
-    {"type":"Village","name":"Itanagar hillside ward","location_id":5,"distance_km":1.3,"people":1750},
-]
+# Operational endpoints never return invented road, shelter or infrastructure
+# inventories. Verified agency GIS can be connected later through dedicated sources.
+ROUTES = []
+INFRA = []
 
 DATA_CATALOG = {
     "open_meteo": {
@@ -98,11 +105,11 @@ DATA_CATALOG = {
         "origin": "https://open-meteo.com/", "coverage": "global", "spatial_resolution": "provider/model dependent",
         "freshness": "current/hourly model fields", "license_note": "See provider terms; values are model-derived observations/forecasts, not station measurements."
     },
-    "prototype_terrain": {
-        "name": "PRAHARI prototype terrain context", "kind": "prototype_context", "status": "BASELINE_DEMO",
-        "origin": "bundled project seed data", "coverage": "8 selected NER demonstration locations",
-        "spatial_resolution": "point attributes", "freshness": "static",
-        "license_note": "Not an authoritative terrain or susceptibility dataset. Replace with verified DEM/lithology/inventory layers for deployment."
+    "open_meteo_elevation": {
+        "name": "Open-Meteo Elevation API", "kind": "terrain_elevation", "status": "LIVE_WHEN_REACHABLE",
+        "origin": "https://open-meteo.com/en/docs/elevation-api", "coverage": "global",
+        "spatial_resolution": "provider DEM dependent", "freshness": "static terrain",
+        "license_note": "Elevation samples are provider-derived. PRAHARI derives a local slope proxy from a 3×3 neighborhood and preserves source provenance."
     },
     "nasa_gibs": {
         "name": "NASA EOSDIS GIBS VIIRS imagery", "kind": "visual_satellite_basemap", "status": "VISUAL_ONLY",
@@ -133,20 +140,25 @@ DATA_CATALOG = {
 REPLAY_NOTICE = "Historical replay/demo data. Values are bundled examples for workflow testing and must not be presented as current observations."
 
 def build_replay_packet(x):
+    """Synthetic QA fixture. Disabled unless explicitly enabled for automated tests."""
+    if not _test_fixtures_enabled():
+        raise HTTPException(404, "Replay fixtures are disabled")
+    now=int(time.time())
     return {
         'availability':'HISTORICAL_REPLAY','live':False,'stale_public':False,'location_id':x['id'],
-        'location':f"{x['name']}, {x['state']}",'source':'PRAHARI historical replay fixture',
-        'source_url':None,'updated_at':int(time.time()),'valid_time':'DEMO_REPLAY',
-        'temperature_c':None,'humidity':None,'precipitation_now_mm':None,'rain_now_mm':None,
-        'cloud_cover_pct':None,'wind_kmh':None,'wind_gust_kmh':None,'soil_moisture_m3m3':None,
-        'soil_moisture_proxy_pct':x['soil_moisture'],'rainfall_6h_mm':round(x['rainfall']/5,1),
-        'rainfall_24h_mm':x['rainfall'],'antecedent_rainfall_72h_mm':round(x['rainfall']*2.15,1),
-        'cumulative_rainfall_7d_mm':round(x['rainfall']*4.6,1),'effective_rainfall_11d_mm':round(x['rainfall']*3.1,1),
-        'max_hourly_rain_24h_mm':round(x['rainfall']/10,1),'rain_forecast_6h_mm':0.0,
-        'rain_forecast_24h_mm':0.0,'rain_forecast_48h_mm':0.0,'rain_forecast_72h_mm':0.0,
-        'max_rain_probability_24h':None,'forecast':[],'note':REPLAY_NOTICE
+        'location':f"{x['name']}, {x['state']}",'source':'PRAHARI automated-test fixture',
+        'source_url':None,'updated_at':now,'valid_time':'TEST_FIXTURE','valid_at_epoch':now,
+        'temperature_c':None,'humidity':80,'precipitation_now_mm':0,'rain_now_mm':0,
+        'cloud_cover_pct':90,'wind_kmh':5,'wind_gust_kmh':8,'soil_moisture_m3m3':0.42,
+        'soil_moisture_proxy_pct':84,'rainfall_6h_mm':34,'rainfall_24h_mm':168,
+        'antecedent_rainfall_72h_mm':360,'cumulative_rainfall_7d_mm':720,
+        'effective_rainfall_11d_mm':520,'max_hourly_rain_24h_mm':28,
+        'rain_forecast_1h_mm':38,'rain_forecast_3h_mm':82,'rain_forecast_6h_mm':125,
+        'rain_forecast_24h_mm':140,'rain_forecast_48h_mm':180,'rain_forecast_72h_mm':210,
+        'max_rain_probability_24h':95,'forecast':[],
+        'terrain_slope_deg':46.0,'elevation_model_m':1650.0,
+        'note':'Synthetic data for automated tests only.'
     }
-
 
 # ---- Live public-data integration -------------------------------------------------
 # Open-Meteo provides the latest continuously updated weather-model conditions
@@ -154,7 +166,11 @@ def build_replay_packet(x):
 # do not change minute-to-minute. A short cache avoids hammering the public API.
 LIVE_WEATHER_CACHE = {}
 LIVE_REGIONAL_CACHE = {"ts": 0, "data": None}
+TERRAIN_CACHE = {}
 LIVE_TTL_SECONDS = WEATHER_CACHE_TTL_SECONDS
+
+def _test_fixtures_enabled() -> bool:
+    return str(os.getenv("PRAHARI_ENABLE_TEST_FIXTURES", "false")).strip().lower() in {"1","true","yes","on"}
 
 def _cache_key_weather(location_id:int) -> str:
     return f"open-meteo:{location_id}"
