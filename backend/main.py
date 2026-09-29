@@ -506,6 +506,8 @@ def enrich_with_live(x, packet):
     d['cumulative_rainfall_7d']=packet.get('cumulative_rainfall_7d_mm')
     d['effective_rainfall_11d']=packet.get('effective_rainfall_11d_mm')
     d['max_hourly_rain_24h']=packet.get('max_hourly_rain_24h_mm')
+    d['rain_forecast_1h_mm']=packet.get('rain_forecast_1h_mm')
+    d['rain_forecast_3h_mm']=packet.get('rain_forecast_3h_mm')
     d['rain_forecast_6h_mm']=packet.get('rain_forecast_6h_mm')
     d['rain_forecast_24h_mm']=packet.get('rain_forecast_24h_mm')
     d['rain_forecast_48h_mm']=packet.get('rain_forecast_48h_mm')
@@ -513,6 +515,18 @@ def enrich_with_live(x, packet):
     d['rain_probability_24h']=packet.get('max_rain_probability_24h')
     d['soil_moisture_m3m3']=packet.get('soil_moisture_m3m3')
     d['month']=datetime.now().month
+
+    if availability=='HISTORICAL_REPLAY' and _test_fixtures_enabled():
+        terrain={'state':'TEST_FIXTURE','source':'automated-test fixture','source_url':None,'fetched_at':packet.get('updated_at'),
+                 'elevation_m':packet.get('elevation_model_m'),'local_slope_proxy_deg':packet.get('terrain_slope_deg'),
+                 'mean_neighbor_slope_deg':packet.get('terrain_slope_deg'),'sample_radius_m':500,'sample_count':9}
+    else:
+        terrain=fetch_terrain_profile(x)
+    d['terrain_state']=terrain.get('state')
+    d['terrain_source']=terrain.get('source')
+    d['elevation']=terrain.get('elevation_m')
+    d['slope']=terrain.get('local_slope_proxy_deg')
+    d['terrain_mean_slope_deg']=terrain.get('mean_neighbor_slope_deg')
 
     try:
         tele=latest_telemetry(x['id']) if 'latest_telemetry' in globals() else None
@@ -539,7 +553,7 @@ def enrich_with_live(x, packet):
         })
     baseline=baseline_assess(vals, tele.get('source') if fresh_tele and tele else None)
     d['assessment_status']=baseline.status
-    d['assessment_kind']='TRANSPARENT_SCREENING_BASELINE'
+    d['assessment_kind']='TRANSPARENT_HILL_SCREEN'
     d['assessment_version']=BASELINE_VERSION
     d['risk_probability']=None
     d['risk_percent']=baseline.index
@@ -550,26 +564,7 @@ def enrich_with_live(x, packet):
     required_count=4; available_count=required_count-len(baseline.missing)
     d['data_completeness_pct']=round(100*available_count/required_count,1)
     d['trend']='UNKNOWN' if baseline.status!='ASSESSED' else ('RISING' if (d.get('rain_forecast_24h_mm') or 0)>=60 else 'WATCH' if baseline.level in ('HIGH','CRITICAL') else 'STABLE')
-
-    # Keep the research ensemble visible as an experimental comparison, never as the primary calibrated probability.
     d['experimental_model']=None
-    if baseline.status=='ASSESSED':
-        try:
-            exp_vals={
-                'rainfall':d['rainfall'],'soil_moisture':d['soil_moisture'],'slope':d['slope'],'elevation':d['elevation'],
-                'historical_risk':d['historical_risk'],'ndvi':d['ndvi'],'antecedent_rainfall_72h':d['antecedent_rainfall_72h'],
-                'cumulative_rainfall_7d':d.get('cumulative_rainfall_7d'),'effective_rainfall_11d':d.get('effective_rainfall_11d'),
-                'rain_forecast_24h':d.get('rain_forecast_24h_mm') or 0,'max_hourly_rain_24h':d.get('max_hourly_rain_24h') or 0,'month':d['month']
-            }
-            exp=ml_predict(exp_vals)
-            d['experimental_model']={
-                'label':'Research ensemble (synthetic/bootstrap training; not field calibrated)',
-                'score_percent':round(float(exp.get('probability',0))*100,1),'level':exp.get('level'),
-                'engine':exp.get('engine'),'provenance':exp.get('provenance'),
-                'model_probabilities':exp.get('model_probabilities',{}),'shap_local':exp.get('shap_local',[])[:6]
-            }
-        except Exception as exc:
-            d['experimental_model']={'available':False,'error':str(exc)}
 
     d['sources']=[
         {
@@ -580,21 +575,23 @@ def enrich_with_live(x, packet):
             'note':packet.get('note')
         },
         {
-            'id':'prototype_terrain','name':DATA_CATALOG['prototype_terrain']['name'],'state':'BASELINE_DEMO',
-            'timestamp':None,'units':{'slope':'deg','elevation':'m','ndvi':'unitless'},
-            'coverage':DATA_CATALOG['prototype_terrain']['coverage'],'spatial_resolution':'point seed attributes',
-            'freshness':'static','origin':'bundled seed data',
-            'note':'Slope/elevation/NDVI/history are prototype context and reduce operational confidence.'
+            'id':'open_meteo_elevation','name':DATA_CATALOG['open_meteo_elevation']['name'],'state':terrain.get('state'),
+            'timestamp':terrain.get('fetched_at'),'units':{'elevation':'m','slope_proxy':'deg'},
+            'coverage':'local 3×3 elevation neighborhood','spatial_resolution':DATA_CATALOG['open_meteo_elevation']['spatial_resolution'],
+            'freshness':'static terrain','origin':DATA_CATALOG['open_meteo_elevation']['origin'],
+            'note':'Local slope proxy derived from provider elevation samples.'
         },
     ]
     if tele:
-        d['sources'].append({'id':'field_telemetry','name':'Field sensor telemetry','state':('CURRENT' if fresh_tele else 'STALE') if tele.get('source')=='REAL_SENSOR' else tele.get('source'),
+        d['sources'].append({'id':'field_telemetry','name':'Field sensor telemetry','state':('CURRENT' if fresh_tele else 'STALE') if tele.get('source')=='REAL_SENSOR' else 'EXCLUDED',
             'timestamp':tele.get('created_at'),'units':'sensor-specific','coverage':tele.get('station_id'),'spatial_resolution':'point sensor',
-            'freshness':'<=30 min considered fresh','origin':tele.get('source'),'note':'Only REAL_SENSOR telemetry influences live precursor escalation.'})
+            'freshness':'<=30 min considered fresh','origin':tele.get('source'),'note':'Only authenticated REAL_SENSOR telemetry affects live escalation.'})
     return d
 
 def locs():
-    return [enrich_with_live(x, build_replay_packet(x)) for x in LOCATIONS]
+    # Registry metadata only. Live hazard state is provided by /api/live/locations.
+    return [{**x,'data_state':'NOT_FETCHED','assessment_status':'NOT_ASSESSED','risk_level':'UNKNOWN',
+             'risk_percent':None,'risk_probability':None,'data_completeness_pct':0,'sources':[]} for x in LOCATIONS]
 
 def _missing_or_cached_packet(x, error_message:str):
     """Return a real cached packet when fresh enough, otherwise explicit MISSING."""
