@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, CircleMarker, Popup, GeoJSON, useMap } from 'r
 import { API, downloadUrl, get, patch, post, postForm, getOperatorKey, setOperatorKey, getPortalSession, setPortalSession, clearPortalSession, loginPortal } from './api.js';
 
 import SatelliteIntelligence from './SatelliteIntelligence.jsx';
+import FlashFloodPanel from './FlashFloodPanel.jsx';
 import BroadcastPanel from './BroadcastPanel.jsx';
 
 const RISK = {
@@ -12,8 +13,8 @@ const RISK = {
   CRITICAL: { label: 'Critical', cls: 'risk-critical' },
   UNKNOWN: { label: 'Unknown', cls: 'risk-unknown' },
 };
-const NAV = ['Overview', 'Risk Map', 'Reports & Alerts', 'Data & Settings'];
-const NAV_ICONS = { 'Overview':'home', 'Risk Map':'map', 'Reports & Alerts':'report', 'Data & Settings':'settings' };
+const NAV = ['Flash Floods', 'Overview', 'Risk Map', 'Reports & Alerts', 'Data & Settings'];
+const NAV_ICONS = { 'Flash Floods':'water', 'Overview':'home', 'Risk Map':'map', 'Reports & Alerts':'report', 'Data & Settings':'settings' };
 const STATE_LABEL = { CURRENT: 'Current', STALE: 'Cached / stale', MISSING: 'Missing', HISTORICAL_REPLAY: 'Historical replay', BASELINE_DEMO: 'Prototype baseline' };
 const RISK_COLOR = { LOW:'#2f855a', MODERATE:'#b7791f', HIGH:'#c05621', CRITICAL:'#c53030', UNKNOWN:'#718096' };
 
@@ -151,7 +152,7 @@ function PortalLogin({onAuthenticated,initialPortal='ADMIN'}) {
     <header className="login-brand"><span className="brand-symbol">P</span><div><strong>PRAHARI</strong><small>Predictive Risk Assessment, Hazard Alert & Response Intelligence</small></div></header>
     <main className="login-card-wrap">
       <section className="login-intro">
-        <span className="hero-kicker">SIH26001 · Northeast India</span>
+        <span className="hero-kicker">SIH26192 · Hilly regions of India</span>
         <h1>One platform.<br/>Two operational portals.</h1>
         <p>Role-separated access keeps command decisions and field enrollment clear, traceable and appropriately restricted.</p>
         <div className="login-safety"><Icon name="shield" size={18}/><span>PRAHARI is advisory decision support. Official warnings remain with authorized agencies.</span></div>
@@ -171,7 +172,7 @@ function PortalLogin({onAuthenticated,initialPortal='ADMIN'}) {
         </form>
       </section>
     </main>
-    <footer className="login-footer">PRAHARI · Role-separated operational access · SIH26001<span className="login-photo-credit">Yumthang Valley, Sikkim · Photo by <a href="https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0" target="_blank" rel="noreferrer">nur alam / Unsplash</a></span></footer>
+    <footer className="login-footer">PRAHARI · Role-separated operational access · SIH26192<span className="login-photo-credit">Yumthang Valley, Sikkim · Photo by <a href="https://unsplash.com/photos/the-sun-is-shining-over-the-mountains-and-trees-U4Qg0MACVy0" target="_blank" rel="noreferrer">nur alam / Unsplash</a></span></footer>
   </div>;
 }
 
@@ -211,7 +212,7 @@ function FieldOfficerPortal({session,onLogout}) {
   const postingAlerts=selected?alerts.filter(a=>a.location_id===selected.id || String(a.location||'').toLowerCase().includes(String(selected.name).toLowerCase())):[];
   const issuedAlerts=postingAlerts.filter(a=>['ISSUED','ACKNOWLEDGED'].includes(a.lifecycle_status));
   const activeHouseholds=households.filter(h=>h.consent_status==='ACTIVE').length;
-  const nav=[['Overview','home'],['Civilian Registry','users'],['Field Reports','report'],['Alerts','alert']];
+  const nav=[['Flash Floods','water'],['Overview','home'],['Civilian Registry','users'],['Field Reports','report'],['Alerts','alert']];
 
   return <div className="app-shell field-portal-shell">
     <aside className="sidebar field-sidebar">
@@ -230,6 +231,7 @@ function FieldOfficerPortal({session,onLogout}) {
       </header>
       <main className="workspace">
         {error&&<ErrorBox message={error} onRetry={loadAll}/>} {loading?<Loading/>:<>
+          {view==='Flash Floods'&&<FlashFloodPanel key={selected?.id} selected={selected} readOnly/>}
           {view==='Overview'&&<FieldOverview selected={selected} profile={profile} activeHouseholds={activeHouseholds} reports={postingReports} alerts={issuedAlerts} onNavigate={setView}/>} 
           {view==='Civilian Registry'&&<div><div className="page-title"><div><h1>Civilian Registry</h1><p>Register opted-in households only for your assigned posting.</p></div><button className="btn btn-secondary" onClick={loadAll}>Refresh registry</button></div><CivilianEnrollmentPane auth={auth||{current_role:'FIELD_OFFICER',actor:profile}} locations={locations} selected={selected}/></div>}
           {view==='Field Reports'&&<div><div className="page-title"><div><h1>Field Reports</h1><p>Submit observations from {profile?.posting||'your posting'}. Report review remains with the command center.</p></div></div><ReportsPane reports={postingReports} selected={selected} onRefresh={loadAll} canManage={false}/></div>}
@@ -291,7 +293,7 @@ function PortalApp(){
 }
 
 function AdminPortal({session,onLogout}) {
-  const [view, setView] = useState('Overview');
+  const [view, setView] = useState('Flash Floods');
   const [mode, setMode] = useState('live');
   const [locations, setLocations] = useState([]);
   const [selectedId, setSelectedId] = useState(1);
@@ -363,7 +365,7 @@ function AdminPortal({session,onLogout}) {
         <span className={`status-dot ${selected?.data_state==='CURRENT'?'online':'degraded'}`}/>
         <div><strong>{selected?.data_state==='CURRENT'?'Live context':'Data status'}</strong><small>{STATE_LABEL[selected?.data_state] || 'Waiting for source'}</small></div>
       </div>
-      <p className="sidebar-note">Decision-support prototype · SIH26001</p>
+      <p className="sidebar-note">Decision-support prototype · SIH26192</p>
     </aside>
 
     <div className="app-frame">
@@ -384,6 +386,7 @@ function AdminPortal({session,onLogout}) {
       <main className="workspace">
         {error && <ErrorBox message={error} onRetry={()=>loadLocations(true)}/>} 
         {loading ? <Loading/> : <>
+          {view==='Flash Floods' && <FlashFloodPanel key={`${selectedId}-${mode}`} selected={selected} mode={mode} onRefreshAlerts={loadSideData}/>}
           {view==='Overview' && <Overview location={activeAssessment} locations={locations} alerts={unresolved} reports={reports} assessmentId={assessmentId} onAssess={runAssessment} onNavigate={setView} refreshing={refreshing} mode={mode}/>} 
           {view==='Risk Map' && <RiskMapPage locations={locations} selected={selected} onSelect={loc=>setSelectedId(loc.id)} onAssess={runAssessment} assessment={activeAssessment}/>} 
           {view==='Reports & Alerts' && <ReportsAlerts reports={reports} alerts={alerts} selected={selected} locations={locations} auth={auth} onRefresh={loadSideData}/>} 
@@ -419,16 +422,16 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
     <section className="overview-hero" aria-labelledby="overview-title">
       <div className="hero-overlay"/>
       <div className="hero-copy">
-        <span className="hero-kicker">Northeast India · Landslide intelligence</span>
+        <span className="hero-kicker">Hilly regions · Flood & landslide intelligence</span>
         <h1 id="overview-title">Stay Ahead.<br/>Stay Safer.</h1>
-        <p>Traceable landslide risk monitoring, field reporting and advisory support—without hiding missing or stale data.</p>
+        <p>Multi-source flash flood screening, supporting landslide assessment, field reporting and reviewed advisories.</p>
         <div className="hero-actions">
-          <button className="btn btn-hero" onClick={()=>onNavigate('Risk Map')}><Icon name="map" size={18}/> View risk map</button>
+          <button className="btn btn-hero" onClick={()=>onNavigate('Risk Map')}><Icon name="map" size={18}/> View landslide map</button>
           <button className="btn btn-hero-secondary" onClick={()=>onNavigate('Reports & Alerts')}><Icon name="report" size={18}/> Report incident</button>
         </div>
       </div>
       <div className="hero-risk-card">
-        <div className="hero-risk-top"><span>Current assessment</span><StateBadge state={location.data_state}/></div>
+        <div className="hero-risk-top"><span>Landslide screening</span><StateBadge state={location.data_state}/></div>
         <RiskBadge level={riskLevel}/>
         <h2>{location.name}, {location.state}</h2>
         <div className="hero-risk-index"><strong>{location.risk_percent == null ? '—' : fmt(location.risk_percent,0)}</strong><span>/100<br/><small>screening index</small></span></div>

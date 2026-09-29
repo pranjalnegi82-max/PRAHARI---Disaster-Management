@@ -9,6 +9,7 @@ import sqlite3
 
 
 TABLES = (
+    'flood_basins', 'flood_gauges', 'flood_assessments',
     'reports', 'alerts', 'system_events', 'telemetry', 'alert_feedback',
     'source_cache', 'assessments', 'alert_audit', 'notification_recipients',
     'notification_deliveries', 'broadcast_jobs', 'broadcast_items', 'broadcast_runtime',

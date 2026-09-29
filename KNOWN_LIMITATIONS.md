@@ -1,3 +1,16 @@
+# SIH26192 flash flood limitations
+
+- Screening thresholds and wetness adjustments are illustrative and uncalibrated.
+- Catchments and settlement points are demo data until configured; configuration is not validation.
+- Point weather samples do not establish hyper-local basin rainfall or flood arrival time.
+- No verified event inventory, watershed routing or inundation model is included.
+- Slope/history configuration is supporting metadata, not a trained flood feature pipeline.
+- No guaranteed evacuation lead time or calibrated flood probability is available.
+- Village map points are contextual; SMS recipient selection remains area based.
+- IoT endpoints require actual deployed sensors; authenticated source labels are not hardware attestation.
+
+See [SIH26192_IMPLEMENTATION.md](SIH26192_IMPLEMENTATION.md).
+
 # Known Limitations & Highest-Value Next Improvements
 
 ## Known limitations
@@ -6,9 +19,9 @@
 - Slope/elevation/NDVI/history for the eight bundled locations are prototype seed context, not an authoritative DEM/geology product.
 - Open-Meteo fields are weather-model data and may differ from a local gauge or geotechnical station.
 - No authoritative asset, road-closure, shelter or administrative exposure layer is bundled; infrastructure/routing modules are visibly prototype-only.
-- NASA/Esri satellite imagery is visual context. No satellite scene is currently processed for landslide segmentation.
+- NASA/Esri basemaps are visual context. Experimental satellite preprocessing/inference exists but requires compatible weights and regional validation.
 - Point IoT telemetry is supported in software, but no physical field station is bundled with this repository.
-- SQLite/operator keys are appropriate for a local prototype; a multi-agency deployment needs PostgreSQL/PostGIS, organizational authentication, secret management, audit retention and operational governance.
+- SQLite and external PostgreSQL are supported; multi-agency deployment still needs organizational identity, appropriate GIS storage, audit retention and operational governance.
 
 ## Next three highest-value improvements
 1. **Build a real Northeast India spatiotemporal training table.** Combine a verified landslide inventory with prediction-time rainfall histories, DEM-derived terrain, geology/land cover and soil-moisture features. Split validation by event/time and geography, compare a simple baseline, then calibrate probabilities and report precision/recall/F1/false alarms.
