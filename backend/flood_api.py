@@ -19,7 +19,7 @@ class Village(BaseModel):
 class Basin(BaseModel):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
     name: str = Field(min_length=2, max_length=150)
-    context_status: Literal['CONFIGURED'] = 'CONFIGURED'
+    context_status: Literal['CONFIGURED', 'AUTO_SCREENING'] = 'CONFIGURED'
     provenance: str = Field(min_length=10, max_length=1000)
     thresholds_mm: dict[str, float]
     villages: list[Village] = Field(min_length=1, max_length=100)
@@ -63,7 +63,17 @@ def routes(db, locations, weather, localized_alert):
         try: row = con.execute('SELECT config_json FROM flood_basins WHERE location_id=?', (location_id,)).fetchone()
         finally: con.close()
         if row: return json.loads(row['config_json'])
-        raise HTTPException(409, 'Catchment configuration required for this monitored area')
+        return {
+            'name': f"{x['name']} monitoring area",
+            'context_status': 'AUTO_SCREENING',
+            'provenance': 'PRAHARI automatic rainfall-screening profile using live public weather forcing; generic thresholds are screening values and not official local warning thresholds.',
+            'thresholds_mm': {'1': 30.0, '3': 60.0, '6': 100.0},
+            'villages': [{'name': x['name'], 'lat': x['lat'], 'lon': x['lon']}],
+            'slope_context': 'Terrain gradient is supplied by the live terrain pipeline when available.',
+            'historical_events_source': 'No locally verified event inventory is attached to the automatic screening profile.',
+            'station_id': None,
+            'danger_stage_m': None,
+        }
 
     @router.get('/basins/{location_id}')
     def basin_get(location_id: int):
