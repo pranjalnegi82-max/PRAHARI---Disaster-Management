@@ -50,12 +50,16 @@ def clean_db(monkeypatch):
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
     main.LIVE_WEATHER_CACHE.clear()
+    main.TERRAIN_CONTEXT_CACHE["data"] = None
+    main.TERRAIN_CONTEXT_CACHE["ts"] = 0
     fixture = live_packet()
     monkeypatch.setattr(main, 'fetch_live_weather', lambda x, **kwargs: dict(fixture, location_id=x['id'], location=f"{x['name']}, {x['state']}"))
     yield
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
     main.LIVE_WEATHER_CACHE.clear()
+    main.TERRAIN_CONTEXT_CACHE["data"] = None
+    main.TERRAIN_CONTEXT_CACHE["ts"] = 0
 
 
 @pytest.fixture
@@ -126,6 +130,7 @@ def test_regional_live_list_uses_one_bulk_telemetry_lookup(monkeypatch):
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
     monkeypatch.setattr(main, "_fetch_json_with_retries", lambda *args, **kwargs: [{} for _ in main.LOCATIONS])
+    monkeypatch.setattr(main, "terrain_context_map", lambda *args, **kwargs: {})
     monkeypatch.setattr(
         main,
         "fetch_live_weather",
@@ -143,6 +148,7 @@ def test_regional_provider_failure_uses_one_bulk_cache_lookup(monkeypatch):
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
     monkeypatch.setattr(main, "_fetch_json_with_retries", lambda *args, **kwargs: (_ for _ in ()).throw(main.URLError("offline")))
+    monkeypatch.setattr(main, "terrain_context_map", lambda *args, **kwargs: {})
     calls=[]
     monkeypatch.setattr(main, "_load_source_cache_map", lambda keys: calls.append(tuple(keys)) or {})
     monkeypatch.setattr(main, "_load_source_cache", lambda *_: (_ for _ in ()).throw(AssertionError("per-location cache lookup used")))
