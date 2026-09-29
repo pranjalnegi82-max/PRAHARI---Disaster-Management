@@ -22,6 +22,9 @@ def client(tmp_path, monkeypatch):
     # main.db uses DB_PATH rather than the legacy DB alias in some versions.
     monkeypatch.setattr(main, 'DB_PATH', tmp_path / 'flood.db')
     main.init_db()
+    monkeypatch.setattr(main, 'terrain_context_map', lambda *args, **kwargs: {
+        1:{'slope_deg':32.0,'elevation_m':2100.0,'local_relief_m':120.0,'source':'QA terrain'}
+    })
     main.app.dependency_overrides[resolve_role] = lambda: 'ADMIN'
     yield TestClient(main.app)
     main.app.dependency_overrides.clear()
