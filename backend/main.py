@@ -85,21 +85,9 @@ LOCATIONS = [
     {"id":17,"name":"Kodaikanal","state":"Tamil Nadu","lat":10.2381,"lon":77.4892},
 ]
 
-ROUTES = [
-    {"id":1,"route":"NH-10: Rangpo → Gangtok","location_id":1,"status":"RESTRICTED","reason":"High slope saturation","priority":"CRITICAL"},
-    {"id":2,"route":"NH-54: Kolasib → Aizawl","location_id":2,"status":"CAUTION","reason":"Persistent rainfall","priority":"HIGH"},
-    {"id":3,"route":"NH-27: Haflong sector","location_id":7,"status":"RESTRICTED","reason":"Debris-flow susceptibility","priority":"HIGH"},
-    {"id":4,"route":"NH-2: Kohima approach","location_id":3,"status":"OPEN","reason":"Moderate monitoring","priority":"MODERATE"},
-    {"id":5,"route":"Shillong bypass","location_id":4,"status":"OPEN","reason":"Stable conditions","priority":"LOW"},
-]
+ROUTES = []
 
-INFRA = [
-    {"type":"Village","name":"Upper Ranka cluster","location_id":1,"distance_km":1.8,"people":2100},
-    {"type":"School","name":"Hillview Senior Secondary","location_id":1,"distance_km":2.4,"people":640},
-    {"type":"Hospital","name":"District Referral Centre","location_id":2,"distance_km":3.2,"people":0},
-    {"type":"Bridge","name":"Haflong approach bridge","location_id":7,"distance_km":0.9,"people":0},
-    {"type":"Village","name":"Itanagar hillside ward","location_id":5,"distance_km":1.3,"people":1750},
-]
+INFRA = []
 
 DATA_CATALOG = {
     "open_meteo": {
