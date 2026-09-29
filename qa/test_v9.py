@@ -21,6 +21,23 @@ os.environ["PRAHARI_DB_PATH"] = str(TEST_DB)
 os.environ["PRAHARI_AUTH_REQUIRED"] = "false"
 
 import main  # noqa: E402
+REAL_FETCH_LIVE_WEATHER = main.fetch_live_weather
+
+def live_packet(location_id=1, name='Shimla', state='Himachal Pradesh'):
+    now=int(main.time.time())
+    return {
+        'availability':'CURRENT','live':True,'stale_public':False,'location_id':location_id,
+        'location':f'{name}, {state}','source':'QA live provider fixture','source_url':None,
+        'updated_at':now,'valid_time':'2026-09-29T12:00','valid_at_epoch':now,
+        'temperature_c':18,'humidity':82,'precipitation_now_mm':1.2,'rain_now_mm':1.2,
+        'cloud_cover_pct':90,'wind_kmh':8,'wind_gust_kmh':16,'soil_moisture_m3m3':0.36,
+        'soil_moisture_proxy_pct':82,'rainfall_6h_mm':32,'rainfall_24h_mm':125,
+        'antecedent_rainfall_72h_mm':280,'cumulative_rainfall_7d_mm':470,
+        'effective_rainfall_11d_mm':390,'max_hourly_rain_24h_mm':24,
+        'rain_forecast_1h_mm':12,'rain_forecast_3h_mm':32,'rain_forecast_6h_mm':58,
+        'rain_forecast_24h_mm':92,'rain_forecast_48h_mm':120,'rain_forecast_72h_mm':155,
+        'max_rain_probability_24h':85,'forecast':[]
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +48,10 @@ def clean_db(monkeypatch):
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
     main.LIVE_WEATHER_CACHE.clear()
+    fixture = live_packet()
+    monkeypatch.setitem(main.LOCATIONS[0], 'slope', 42)
+    monkeypatch.setitem(main.LOCATIONS[0], 'elevation', 2200)
+    monkeypatch.setattr(main, 'fetch_live_weather', lambda x, **kwargs: dict(fixture, location_id=x['id'], location=f"{x['name']}, {x['state']}"))
     yield
     main.LIVE_REGIONAL_CACHE["data"] = None
     main.LIVE_REGIONAL_CACHE["ts"] = 0
@@ -42,18 +63,12 @@ def client():
     return TestClient(main.app)
 
 
-def test_replay_is_explicit_and_assessable(client):
-    r = client.get("/api/live/locations/1?mode=replay")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["data_state"] == "HISTORICAL_REPLAY"
-    assert body["assessment_status"] == "ASSESSED"
-    assert body["risk_probability"] is None
-    assert body["risk_percent"] is not None
-    assert any(s["state"] == "HISTORICAL_REPLAY" for s in body["sources"])
+def test_replay_mode_is_rejected(client):
+    assert client.get('/api/live/locations/1?mode=replay').status_code == 422
 
 
 def test_provider_failure_is_missing_not_low(monkeypatch, client):
+    monkeypatch.setattr(main, 'fetch_live_weather', REAL_FETCH_LIVE_WEATHER)
     main.LIVE_WEATHER_CACHE.clear()
     monkeypatch.setattr(main, "_load_source_cache", lambda key: None)
     def fail(*args, **kwargs):
@@ -69,12 +84,10 @@ def test_provider_failure_is_missing_not_low(monkeypatch, client):
 
 
 def test_stale_real_packet_is_labeled_stale(monkeypatch, client):
+    monkeypatch.setattr(main, 'fetch_live_weather', REAL_FETCH_LIVE_WEATHER)
     now = int(main.time.time())
-    packet = main.build_replay_packet(main.LOCATIONS[0])
-    packet.update({
-        "availability": "CURRENT", "live": True, "source": "Open-Meteo test packet",
-        "updated_at": now, "valid_time": "2026-09-16T12:00",
-    })
+    packet = live_packet()
+    packet.update({"source":"Open-Meteo test packet","updated_at":now,"valid_time":"2026-09-16T12:00"})
     main.LIVE_WEATHER_CACHE[1] = {"packet": packet, "cached_at": now}
     def fail(*args, **kwargs):
         raise main.URLError("offline")
@@ -86,11 +99,11 @@ def test_stale_real_packet_is_labeled_stale(monkeypatch, client):
 
 
 def test_invalid_location_returns_404(client):
-    assert client.get("/api/live/locations/999?mode=replay").status_code == 404
+    assert client.get("/api/live/locations/999").status_code == 404
 
 
 def test_assessment_persists_and_exports(client):
-    r = client.post("/api/assessments/1?mode=replay")
+    r = client.post("/api/assessments/1?mode=live")
     assert r.status_code == 200
     aid = r.json()["assessment_id"]
     history = client.get("/api/assessments/1/history").json()
@@ -98,7 +111,7 @@ def test_assessment_persists_and_exports(client):
     exported = client.get(f"/api/assessment-records/{aid}/export?format=json")
     assert exported.status_code == 200
     out = exported.json()
-    assert out["mode"] == "replay"
+    assert out["mode"] == "live"
     assert out["risk_index"] is not None
     assert out["sources"]
     with sqlite3.connect(TEST_DB) as con:
@@ -106,11 +119,11 @@ def test_assessment_persists_and_exports(client):
 
 
 def test_duplicate_draft_alert_is_prevented(client):
-    one = client.post("/api/assessments/1?mode=replay")
-    two = client.post("/api/assessments/1?mode=replay")
+    one = client.post("/api/assessments/1?mode=live")
+    two = client.post("/api/assessments/1?mode=live")
     assert one.status_code == two.status_code == 200
     alerts = client.get("/api/alerts").json()
-    matching = [a for a in alerts if a["source"] == "assessment-replay" and a["location_id"] == 1]
+    matching = [a for a in alerts if a["source"] == "assessment-live" and a["location_id"] == 1]
     assert len(matching) == 1
     assert matching[0]["lifecycle_status"] == "DRAFT"
     assert not matching[0]["public_warning_issued"]
@@ -123,7 +136,7 @@ def test_alert_lifecycle_and_authorization_boundary(monkeypatch, client):
     auth.REVIEWER_KEY = "reviewer-test"
     auth.ADMIN_KEY = "admin-test"
     try:
-        created = client.post("/api/assessments/1?mode=replay", headers={"X-PRAHARI-Key":"operator-test"})
+        created = client.post("/api/assessments/1?mode=live", headers={"X-PRAHARI-Key":"operator-test"})
         assert created.status_code == 200
         alert = client.get("/api/alerts").json()[0]
         aid = alert["id"]
@@ -140,7 +153,7 @@ def test_alert_lifecycle_and_authorization_boundary(monkeypatch, client):
 
 def test_invalid_upload_signature_is_rejected(client):
     data = {
-        "reporter":"Field observer", "phone":"", "location":"Gangtok, Sikkim",
+        "reporter":"Field observer", "phone":"", "location":"Shimla, Himachal Pradesh",
         "lat":"27.3314", "lon":"88.6138", "hazard_type":"Surface crack",
         "location_method":"manual", "severity":"HIGH",
         "description":"A widening crack is visible across the slope shoulder."
@@ -153,7 +166,7 @@ def test_invalid_upload_signature_is_rejected(client):
 
 def test_report_persists_and_requires_operator_for_status(monkeypatch, client):
     data = {
-        "reporter":"Field observer", "phone":"", "location":"Gangtok, Sikkim",
+        "reporter":"Field observer", "phone":"", "location":"Shimla, Himachal Pradesh",
         "lat":"27.3314", "lon":"88.6138", "hazard_type":"Slope movement",
         "location_method":"manual", "severity":"MODERATE",
         "description":"Slow visible movement and fresh small cracks after rain."
@@ -172,18 +185,12 @@ def test_report_persists_and_requires_operator_for_status(monkeypatch, client):
         auth.AUTH_REQUIRED = False
 
 
-def test_simulated_iot_cannot_escalate_live_alert(client):
-    before = len(client.get("/api/alerts").json())
-    r = client.post("/api/iot/demo/1")
-    assert r.status_code == 200
-    assert r.json()["source"] == "SIMULATED_HACKATHON"
-    assert r.json()["draft_advisory_created"] is False
-    after = len(client.get("/api/alerts").json())
-    assert after == before
+def test_demo_iot_endpoint_is_removed(client):
+    assert client.post('/api/iot/demo/1').status_code == 404
 
 
 def test_satellite_endpoint_does_not_claim_model_inference(client, monkeypatch):
-    monkeypatch.setattr(main, "fetch_live_weather", lambda x, **kwargs: main.build_replay_packet(x))
+    monkeypatch.setattr(main, "fetch_live_weather", lambda x, **kwargs: live_packet(x["id"], x["name"], x["state"]))
     r = client.get("/api/satellite/1")
     assert r.status_code == 200
     body = r.json()
@@ -194,7 +201,7 @@ def test_satellite_endpoint_does_not_claim_model_inference(client, monkeypatch):
 
 
 def _make_reviewed_alert(client):
-    created = client.post('/api/assessments/1?mode=replay')
+    created = client.post('/api/assessments/1?mode=live')
     assert created.status_code == 200
     alert = client.get('/api/alerts').json()[0]
     aid = alert['id']
@@ -292,7 +299,7 @@ def test_manual_advisory_can_be_drafted_without_assessment_or_sms(monkeypatch, c
     assert alert['source'] == 'admin-manual'
     assert alert['risk_percent'] is None
     assert alert['public_warning_issued'] is False
-    assert alert['location'] == 'Gangtok, Sikkim'
+    assert alert['location'] == 'Shimla, Himachal Pradesh'
     assert alert['message'] == 'TEST ONLY: This is a synthetic draft for workflow testing.'
     assert client.get('/api/alerts').json()[0]['id'] == alert['id']
     history=client.get(f"/api/alerts/{alert['id']}/history").json()['history']
@@ -345,7 +352,7 @@ def test_manual_advisory_review_and_sms_preserve_complete_written_message(monkey
     reviewed=client.patch(f'/api/alerts/{aid}/transition',json={'to_status':'REVIEWED'})
     assert reviewed.status_code == 200
     preview=client.get(f'/api/alerts/{aid}/notification-preview').json()
-    assert preview['message'] == f'PRAHARI | Gangtok, Sikkim\n{message}'
+    assert preview['message'] == f'PRAHARI | Shimla, Himachal Pradesh\n{message}'
     assert len(preview['message']) > 300
     result=client.post(f'/api/alerts/{aid}/issue-and-notify',json={})
     assert result.status_code == 200
@@ -466,10 +473,10 @@ def test_field_officer_enrollment_is_locked_to_posting(client):
     import auth
     auth.AUTH_REQUIRED = True
     auth.FIELD_OFFICERS = [{
-        'name':'Gangtok Field Officer','officer_code':'FO-GTK-01','location_id':1,'key':'field-gangtok-test'
+        'name':'Shimla Field Officer','officer_code':'FO-GTK-01','location_id':1,'key':'field-shimla-test'
     }]
     try:
-        headers={'X-PRAHARI-Key':'field-gangtok-test'}
+        headers={'X-PRAHARI-Key':'field-shimla-test'}
         status=client.get('/api/auth/status',headers=headers)
         assert status.status_code == 200
         assert status.json()['current_role'] == 'FIELD_OFFICER'
@@ -500,7 +507,7 @@ def test_field_officer_enrollment_is_locked_to_posting(client):
 def test_admin_can_broadcast_to_specific_or_all_monitored_areas(monkeypatch, client):
     aid = _make_reviewed_alert(client)
     for name,phone,location_id in [
-        ('Gangtok resident','+919833333331',1),('Aizawl resident','+919833333332',2)
+        ('Shimla resident','+919833333331',1),('Mandi resident','+919833333332',2)
     ]:
         r=client.post('/api/notification/recipients',json={
             'name':name,'phone_e164':phone,'location_id':location_id,'language':'en',
@@ -518,7 +525,7 @@ def test_admin_can_broadcast_to_specific_or_all_monitored_areas(monkeypatch, cli
     preview=client.get(f'/api/alerts/{aid}/notification-preview?scope=SPECIFIC_AREA&target_location_id=2')
     assert preview.status_code == 200
     assert preview.json()['sms_recipients'] == 1
-    assert 'Aizawl' in preview.json()['target_label']
+    assert 'Mandi' in preview.json()['target_label']
 
     out=client.post(f'/api/alerts/{aid}/issue-and-notify',json={'scope':'ALL_MONITORED'})
     assert out.status_code == 200
@@ -548,7 +555,7 @@ def test_separate_admin_portal_login(client, monkeypatch):
 
 def test_separate_field_officer_portal_login_is_posting_scoped(client, monkeypatch):
     import auth
-    officers=[{'name':'Gangtok Field Officer','officer_code':'FO-GTK-01','location_id':1,'key':'field-portal-test'}]
+    officers=[{'name':'Shimla Field Officer','officer_code':'FO-GTK-01','location_id':1,'key':'field-portal-test'}]
     monkeypatch.setattr(auth, 'FIELD_OFFICERS', officers)
 
     mismatch = client.post('/api/auth/login', json={
@@ -564,7 +571,7 @@ def test_separate_field_officer_portal_login_is_posting_scoped(client, monkeypat
     assert body['portal'] == 'FIELD_OFFICER'
     assert body['current_role'] == 'FIELD_OFFICER'
     assert body['actor']['posting_location_id'] == 1
-    assert 'Gangtok' in body['actor']['posting']
+    assert 'Shimla' in body['actor']['posting']
 
     # A field-officer key cannot become an admin just by selecting the admin portal.
     denied_admin = client.post('/api/auth/login', json={'portal':'ADMIN','access_key':'field-portal-test'})

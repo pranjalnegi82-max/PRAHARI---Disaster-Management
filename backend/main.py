@@ -54,7 +54,7 @@ DB = DB_PATH
 TILE_CACHE = BASE / "tile_cache" / "nasa"
 TILE_CACHE.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="PRAHARI Command Center API", version="10.0.0", description="Traceable landslide risk assessment with separate admin and field-officer portals for SIH26192")
+app = FastAPI(title="PRAHARI Command Center API", version="11.0.0", description="Multi-source flash-flood and mountain-hazard decision support for hilly regions")
 app.add_middleware(GZipMiddleware, minimum_size=700)
 app.add_middleware(
     CORSMiddleware,
@@ -66,43 +66,34 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS)), name="uploads")
 
 LOCATIONS = [
-    {"id":1,"name":"Gangtok","state":"Sikkim","lat":27.3314,"lon":88.6138,"rainfall":168,"soil_moisture":84,"slope":46,"elevation":1650,"historical_risk":0.82,"ndvi":0.61,"population_exposed":14200},
-    {"id":2,"name":"Aizawl","state":"Mizoram","lat":23.7271,"lon":92.7176,"rainfall":132,"soil_moisture":76,"slope":41,"elevation":1132,"historical_risk":0.72,"ndvi":0.67,"population_exposed":9700},
-    {"id":3,"name":"Kohima","state":"Nagaland","lat":25.6751,"lon":94.1086,"rainfall":95,"soil_moisture":62,"slope":34,"elevation":1444,"historical_risk":0.52,"ndvi":0.73,"population_exposed":6300},
-    {"id":4,"name":"Shillong","state":"Meghalaya","lat":25.5788,"lon":91.8933,"rainfall":82,"soil_moisture":58,"slope":29,"elevation":1525,"historical_risk":0.45,"ndvi":0.69,"population_exposed":5100},
-    {"id":5,"name":"Itanagar","state":"Arunachal Pradesh","lat":27.0844,"lon":93.6053,"rainfall":145,"soil_moisture":80,"slope":44,"elevation":320,"historical_risk":0.78,"ndvi":0.76,"population_exposed":11400},
-    {"id":6,"name":"Imphal East","state":"Manipur","lat":24.8170,"lon":93.9368,"rainfall":72,"soil_moisture":54,"slope":22,"elevation":786,"historical_risk":0.35,"ndvi":0.64,"population_exposed":3700},
-    {"id":7,"name":"Dima Hasao","state":"Assam","lat":25.1870,"lon":93.0250,"rainfall":154,"soil_moisture":79,"slope":43,"elevation":980,"historical_risk":0.76,"ndvi":0.71,"population_exposed":8200},
-    {"id":8,"name":"Unakoti","state":"Tripura","lat":24.3150,"lon":92.0670,"rainfall":61,"soil_moisture":49,"slope":18,"elevation":220,"historical_risk":0.24,"ndvi":0.70,"population_exposed":2400},
+    {"id":1,"name":"Shimla","state":"Himachal Pradesh","lat":31.1048,"lon":77.1734},
+    {"id":2,"name":"Mandi","state":"Himachal Pradesh","lat":31.7087,"lon":76.9320},
+    {"id":3,"name":"Kullu","state":"Himachal Pradesh","lat":31.9579,"lon":77.1095},
+    {"id":4,"name":"Dharamshala","state":"Himachal Pradesh","lat":32.2190,"lon":76.3234},
+    {"id":5,"name":"Rudraprayag","state":"Uttarakhand","lat":30.2844,"lon":78.9811},
+    {"id":6,"name":"Joshimath","state":"Uttarakhand","lat":30.5554,"lon":79.5650},
+    {"id":7,"name":"Nainital","state":"Uttarakhand","lat":29.3919,"lon":79.4542},
+    {"id":8,"name":"Gangtok","state":"Sikkim","lat":27.3314,"lon":88.6138},
+    {"id":9,"name":"Darjeeling","state":"West Bengal","lat":27.0410,"lon":88.2663},
+    {"id":10,"name":"Shillong","state":"Meghalaya","lat":25.5788,"lon":91.8933},
+    {"id":11,"name":"Itanagar","state":"Arunachal Pradesh","lat":27.0844,"lon":93.6053},
+    {"id":12,"name":"Kohima","state":"Nagaland","lat":25.6751,"lon":94.1086},
+    {"id":13,"name":"Aizawl","state":"Mizoram","lat":23.7271,"lon":92.7176},
+    {"id":14,"name":"Wayanad","state":"Kerala","lat":11.6854,"lon":76.1320},
+    {"id":15,"name":"Munnar","state":"Kerala","lat":10.0889,"lon":77.0595},
+    {"id":16,"name":"Ooty","state":"Tamil Nadu","lat":11.4064,"lon":76.6932},
+    {"id":17,"name":"Kodaikanal","state":"Tamil Nadu","lat":10.2381,"lon":77.4892},
 ]
 
-ROUTES = [
-    {"id":1,"route":"NH-10: Rangpo → Gangtok","location_id":1,"status":"RESTRICTED","reason":"High slope saturation","priority":"CRITICAL"},
-    {"id":2,"route":"NH-54: Kolasib → Aizawl","location_id":2,"status":"CAUTION","reason":"Persistent rainfall","priority":"HIGH"},
-    {"id":3,"route":"NH-27: Haflong sector","location_id":7,"status":"RESTRICTED","reason":"Debris-flow susceptibility","priority":"HIGH"},
-    {"id":4,"route":"NH-2: Kohima approach","location_id":3,"status":"OPEN","reason":"Moderate monitoring","priority":"MODERATE"},
-    {"id":5,"route":"Shillong bypass","location_id":4,"status":"OPEN","reason":"Stable conditions","priority":"LOW"},
-]
+ROUTES = []
 
-INFRA = [
-    {"type":"Village","name":"Upper Ranka cluster","location_id":1,"distance_km":1.8,"people":2100},
-    {"type":"School","name":"Hillview Senior Secondary","location_id":1,"distance_km":2.4,"people":640},
-    {"type":"Hospital","name":"District Referral Centre","location_id":2,"distance_km":3.2,"people":0},
-    {"type":"Bridge","name":"Haflong approach bridge","location_id":7,"distance_km":0.9,"people":0},
-    {"type":"Village","name":"Itanagar hillside ward","location_id":5,"distance_km":1.3,"people":1750},
-]
+INFRA = []
 
 DATA_CATALOG = {
     "open_meteo": {
         "name": "Open-Meteo Forecast API", "kind": "weather_model", "status": "LIVE_WHEN_REACHABLE",
         "origin": "https://open-meteo.com/", "coverage": "global", "spatial_resolution": "provider/model dependent",
         "freshness": "current/hourly model fields", "license_note": "See provider terms; values are model-derived observations/forecasts, not station measurements."
-    },
-    "prototype_terrain": {
-        "name": "PRAHARI prototype terrain context", "kind": "prototype_context", "status": "BASELINE_DEMO",
-        "origin": "bundled project seed data", "coverage": "8 selected NER demonstration locations",
-        "spatial_resolution": "point attributes", "freshness": "static",
-        "license_note": "Not an authoritative terrain or susceptibility dataset. Replace with verified DEM/lithology/inventory layers for deployment."
     },
     "nasa_gibs": {
         "name": "NASA EOSDIS GIBS VIIRS imagery", "kind": "visual_satellite_basemap", "status": "VISUAL_ONLY",
@@ -129,24 +120,6 @@ DATA_CATALOG = {
         "license_note": "Official baseline code is MIT licensed. No Landslide4Sense inference model is bundled in PRAHARI v9."
     },
 }
-
-REPLAY_NOTICE = "Historical replay/demo data. Values are bundled examples for workflow testing and must not be presented as current observations."
-
-def build_replay_packet(x):
-    return {
-        'availability':'HISTORICAL_REPLAY','live':False,'stale_public':False,'location_id':x['id'],
-        'location':f"{x['name']}, {x['state']}",'source':'PRAHARI historical replay fixture',
-        'source_url':None,'updated_at':int(time.time()),'valid_time':'DEMO_REPLAY',
-        'temperature_c':None,'humidity':None,'precipitation_now_mm':None,'rain_now_mm':None,
-        'cloud_cover_pct':None,'wind_kmh':None,'wind_gust_kmh':None,'soil_moisture_m3m3':None,
-        'soil_moisture_proxy_pct':x['soil_moisture'],'rainfall_6h_mm':round(x['rainfall']/5,1),
-        'rainfall_24h_mm':x['rainfall'],'antecedent_rainfall_72h_mm':round(x['rainfall']*2.15,1),
-        'cumulative_rainfall_7d_mm':round(x['rainfall']*4.6,1),'effective_rainfall_11d_mm':round(x['rainfall']*3.1,1),
-        'max_hourly_rain_24h_mm':round(x['rainfall']/10,1),'rain_forecast_6h_mm':0.0,
-        'rain_forecast_24h_mm':0.0,'rain_forecast_48h_mm':0.0,'rain_forecast_72h_mm':0.0,
-        'max_rain_probability_24h':None,'forecast':[],'note':REPLAY_NOTICE
-    }
-
 
 # ---- Live public-data integration -------------------------------------------------
 # Open-Meteo provides the latest continuously updated weather-model conditions
@@ -211,7 +184,7 @@ def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
     last_error=None
     for attempt in range(max(1, attempts)):
         try:
-            req=UrlRequest(url, headers={'User-Agent':'PRAHARI-SIH26192/10.0'})
+            req=UrlRequest(url, headers={'User-Agent':'PRAHARI/11.0'})
             with urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode('utf-8'))
         except HTTPError as exc:
@@ -290,8 +263,7 @@ def fetch_live_weather(x, force=False, data_override=None):
         if past_idx_all:
             try: soil = soil_series[past_idx_all[-1]]
             except Exception: soil = None
-        # Convert volumetric water content to a 0-100 wetness proxy for the existing
-        # prototype model. This is not a direct field-probe saturation percentage.
+        # Convert volumetric water content to a 0-100 wetness proxy for the operational wetness indicator. This is not a direct field-probe saturation percentage.
         soil_proxy = round(clamp(float(soil) / 0.5) * 100, 1) if soil is not None else None
 
         def hval(arr, idx, default=None):
@@ -367,7 +339,7 @@ def fetch_live_weather(x, force=False, data_override=None):
             'rain_forecast_72h_mm': _sum_indices(precip,future_idx[:72]),
             'max_rain_probability_24h': max([float(hval(probs,i,0) or 0) for i in future_idx[:24]] or [0]),
             'forecast': points,
-            'note': 'Current conditions are model-derived. Soil moisture is converted to a wetness proxy for the prototype risk model.'
+            'note': 'Current conditions are model-derived. Soil moisture is converted to a wetness proxy.'
         }
         if data_override is None:
             LIVE_WEATHER_CACHE[x['id']]={'cached_at':now,'packet':packet}
@@ -474,25 +446,8 @@ def enrich_with_live(x, packet):
     d['data_completeness_pct']=round(100*available_count/required_count,1)
     d['trend']='UNKNOWN' if baseline.status!='ASSESSED' else ('RISING' if (d.get('rain_forecast_24h_mm') or 0)>=60 else 'WATCH' if baseline.level in ('HIGH','CRITICAL') else 'STABLE')
 
-    # Keep the research ensemble visible as an experimental comparison, never as the primary calibrated probability.
+
     d['experimental_model']=None
-    if baseline.status=='ASSESSED':
-        try:
-            exp_vals={
-                'rainfall':d['rainfall'],'soil_moisture':d['soil_moisture'],'slope':d['slope'],'elevation':d['elevation'],
-                'historical_risk':d['historical_risk'],'ndvi':d['ndvi'],'antecedent_rainfall_72h':d['antecedent_rainfall_72h'],
-                'cumulative_rainfall_7d':d.get('cumulative_rainfall_7d'),'effective_rainfall_11d':d.get('effective_rainfall_11d'),
-                'rain_forecast_24h':d.get('rain_forecast_24h_mm') or 0,'max_hourly_rain_24h':d.get('max_hourly_rain_24h') or 0,'month':d['month']
-            }
-            exp=ml_predict(exp_vals)
-            d['experimental_model']={
-                'label':'Research ensemble (synthetic/bootstrap training; not field calibrated)',
-                'score_percent':round(float(exp.get('probability',0))*100,1),'level':exp.get('level'),
-                'engine':exp.get('engine'),'provenance':exp.get('provenance'),
-                'model_probabilities':exp.get('model_probabilities',{}),'shap_local':exp.get('shap_local',[])[:6]
-            }
-        except Exception as exc:
-            d['experimental_model']={'available':False,'error':str(exc)}
 
     d['sources']=[
         {
@@ -502,13 +457,6 @@ def enrich_with_live(x, packet):
             'freshness':DATA_CATALOG['open_meteo']['freshness'],'origin':DATA_CATALOG['open_meteo']['origin'],
             'note':packet.get('note')
         },
-        {
-            'id':'prototype_terrain','name':DATA_CATALOG['prototype_terrain']['name'],'state':'BASELINE_DEMO',
-            'timestamp':None,'units':{'slope':'deg','elevation':'m','ndvi':'unitless'},
-            'coverage':DATA_CATALOG['prototype_terrain']['coverage'],'spatial_resolution':'point seed attributes',
-            'freshness':'static','origin':'bundled seed data',
-            'note':'Slope/elevation/NDVI/history are prototype context and reduce operational confidence.'
-        },
     ]
     if tele:
         d['sources'].append({'id':'field_telemetry','name':'Field sensor telemetry','state':('CURRENT' if fresh_tele else 'STALE') if tele.get('source')=='REAL_SENSOR' else tele.get('source'),
@@ -517,7 +465,7 @@ def enrich_with_live(x, packet):
     return d
 
 def locs():
-    return [enrich_with_live(x, build_replay_packet(x)) for x in LOCATIONS]
+    return [enrich_with_live(x, _missing_or_cached_packet(x, 'Live data not loaded')) for x in LOCATIONS]
 
 def _missing_or_cached_packet(x, error_message:str):
     """Return a real cached packet when fresh enough, otherwise explicit MISSING."""
@@ -556,8 +504,6 @@ def _missing_or_cached_packet(x, error_message:str):
     }
 
 def live_locs(force=False, mode='live'):
-    if mode == 'replay':
-        return [enrich_with_live(x, build_replay_packet(x)) for x in LOCATIONS]
     now=int(time.time())
     if LIVE_REGIONAL_CACHE['data'] is not None and not force and now-LIVE_REGIONAL_CACHE['ts'] < LIVE_TTL_SECONDS:
         return LIVE_REGIONAL_CACHE['data']
@@ -903,7 +849,7 @@ def satellite_packet(x):
         'pipeline_status':'SCENE_DISCOVERY_IMPLEMENTED','imagery_basemap':'NASA GIBS / Esri imagery when reachable',
         'terrain_basemap':'OpenTopoMap when reachable','analysis_mode':'SENTINEL2_SCENE_QA_PLUS_VISUAL_CONTEXT',
         'risk_level':x.get('risk_level','UNKNOWN'),'risk_percent':x.get('risk_percent'),
-        'terrain_context':{'slope_deg':x.get('slope'),'elevation_m':x.get('elevation'),'ndvi_baseline':x.get('ndvi'),'source_state':'BASELINE_DEMO'},
+        'terrain_context':{'slope_deg':None,'elevation_m':None,'ndvi_baseline':None,'source_state':'NOT_CONFIGURED'},
         'scene_discovery':{'provider':'Element 84 Earth Search','collection':'sentinel-2-l2a','status':'IMPLEMENTED',
                            'note':'PRAHARI searches real Sentinel-2 L2A acquisitions and identifies recent/reference scene pairs using acquisition date and cloud metadata.'},
         'detection_module':{'name':'Landslide4Sense-compatible post-event segmentation','status':'CHECK_MODEL_STATUS_ENDPOINT',
@@ -1037,7 +983,7 @@ def satellite_architecture():
             'model_status_endpoint':'/api/satellite/model/status',
             'preprocess_status_endpoint':'/api/satellite/preprocess/status'
         },
-        'susceptibility':{'status':'BASELINE_DEMO','note':'Current slope/elevation/NDVI context is seeded prototype data, not authoritative DEM-derived raster analysis.'},
+        'susceptibility':{'status':'NOT_CONFIGURED','note':'Terrain susceptibility is unavailable until authoritative terrain inputs are configured.'},
         'deformation_monitoring':{'status':'ROADMAP','note':'Sentinel-1/InSAR slope-deformation monitoring is intentionally separate from optical post-event detection.'},
         'research_basis':{
             'landslide4sense':'Official benchmark uses 12 Sentinel-2 multispectral bands plus slope and DEM at approximately 10 m pixels.',
@@ -1235,7 +1181,7 @@ def status():
         "satellite_nrt":"NASA GIBS VIIRS NRT with pre-warm local tile cache",
         "unacknowledged_alerts":alert_count,
         "last_sync":int(time.time()),
-        "historical_replay_mode":True,
+        "historical_replay_mode":False,
         "auth_required":AUTH_REQUIRED
     }
 
@@ -1262,16 +1208,16 @@ def locations():
 
 
 @app.get("/api/live/locations")
-def live_locations(force:bool=False, mode:Literal['live','replay']='live'):
+def live_locations(force:bool=False, mode:Literal['live']='live'):
     return live_locs(force=force, mode=mode)
 
 
 @app.get("/api/live/locations/{location_id}")
-def live_location(location_id:int, force:bool=False, mode:Literal['live','replay']='live'):
+def live_location(location_id:int, force:bool=False, mode:Literal['live']='live'):
     x = next((z for z in LOCATIONS if z['id']==location_id), None)
     if not x:
         raise HTTPException(404,"Location not found")
-    packet=build_replay_packet(x) if mode=='replay' else fetch_live_weather(x, force=force)
+    packet=fetch_live_weather(x, force=force)
     return enrich_with_live(x, packet)
 
 @app.post("/api/live/browser-relay/{location_id}", tags=["System"])
@@ -1345,11 +1291,11 @@ def _save_assessment(location_id:int, mode:str, result:dict) -> int:
     con.commit(); con.close(); return aid
 
 @app.post('/api/assessments/{location_id}')
-def run_assessment(location_id:int, mode:Literal['live','replay']='live', force:bool=False, role:str=Depends(resolve_role)):
+def run_assessment(location_id:int, mode:Literal['live']='live', force:bool=False, role:str=Depends(resolve_role)):
     require_role(role,'OPERATOR')
     x=next((z for z in LOCATIONS if z['id']==location_id),None)
     if not x: raise HTTPException(404,'Location not found')
-    packet=build_replay_packet(x) if mode=='replay' else fetch_live_weather(x,force=force)
+    packet=fetch_live_weather(x,force=force)
     result=enrich_with_live(x,packet); assessment_id=_save_assessment(location_id,mode,result)
     draft=None
     if result.get('assessment_status')=='ASSESSED' and result.get('risk_level') in ('HIGH','CRITICAL'):
@@ -1406,7 +1352,7 @@ def predict(inp: RiskInput):
             'risk_probability':None,'experimental_score_percent':round(p*100,1),'risk_percent':round(p*100,1),'risk_level':level,
             'recommended_action':action_for(level),'model_probabilities':result.get('model_probabilities',{}),'shap_local':result.get('shap_local',[]),
             'engine':result.get('engine'),'model_provenance':result.get('provenance'),
-            'limitations':['Synthetic/bootstrap training; not field-calibrated for Northeast India.','Score must not be described as an operational probability.'],
+            'limitations':['Synthetic/bootstrap training; not field-calibrated for hilly regions.','Score must not be described as an operational probability.'],
             'automatic_alert_triggered':False
         }
     base=baseline_assess({
@@ -1441,9 +1387,9 @@ def summary():
         "high_zones":high,
         "active_alerts":unacked,
         "citizen_reports":report_count,
-        "population_exposed_prototype":sum(x.get('population_exposed',0) for x in data if x.get('risk_level') in ('HIGH','CRITICAL')),
+        "population_exposed_prototype":None,
         "avg_risk_index":round(sum(float(x['risk_percent']) for x in assessed)/len(assessed),1) if assessed else None,
-        "note":"Risk index is an uncalibrated screening index; prototype exposure totals are not authoritative impact estimates."
+        "note":"Risk screening is separate from exposure; authoritative exposure data are not configured."
     }
 
 
@@ -1908,7 +1854,7 @@ def auth_status(x_prahari_key:Optional[str]=Header(default=None,alias='X-PRAHARI
 
 @app.get('/api/data/sources')
 def data_sources():
-    return {'sources':DATA_CATALOG,'policy':'CURRENT, STALE, MISSING and HISTORICAL_REPLAY states are explicit. Missing data never silently becomes low risk.'}
+    return {'sources':DATA_CATALOG,'policy':'CURRENT, STALE and MISSING source states are explicit. Missing data never silently becomes low risk.'}
 
 @app.get("/api/weather/{location_id}")
 def weather(location_id:int, force:bool=False):
@@ -2174,18 +2120,7 @@ PRECURSOR_WEIGHTS = {
 }
 SEVERITY_W = {'LOW':.2,'MODERATE':.45,'HIGH':.75,'CRITICAL':1.0}
 
-# Prototype assembly points and a tiny offline routing graph. These are not
-# official shelters; they demonstrate how verified emergency GIS would plug in.
-SHELTERS = {
-    1:[{'id':'G-A','name':'Prototype Assembly Point G-A','lat':27.344,'lon':88.606,'capacity':900}, {'id':'G-B','name':'Prototype Assembly Point G-B','lat':27.318,'lon':88.625,'capacity':700}],
-    2:[{'id':'A-A','name':'Prototype Assembly Point A-A','lat':23.742,'lon':92.710,'capacity':850}, {'id':'A-B','name':'Prototype Assembly Point A-B','lat':23.713,'lon':92.729,'capacity':650}],
-    3:[{'id':'K-A','name':'Prototype Assembly Point K-A','lat':25.690,'lon':94.100,'capacity':700}],
-    4:[{'id':'S-A','name':'Prototype Assembly Point S-A','lat':25.590,'lon':91.879,'capacity':900}],
-    5:[{'id':'I-A','name':'Prototype Assembly Point I-A','lat':27.098,'lon':93.590,'capacity':850}],
-    6:[{'id':'M-A','name':'Prototype Assembly Point M-A','lat':24.830,'lon':93.924,'capacity':800}],
-    7:[{'id':'D-A','name':'Prototype Assembly Point D-A','lat':25.200,'lon':93.012,'capacity':650}],
-    8:[{'id':'U-A','name':'Prototype Assembly Point U-A','lat':24.327,'lon':92.054,'capacity':600}],
-}
+SHELTERS = {}
 
 def _haversine(lat1,lon1,lat2,lon2):
     r=6371.0
@@ -2231,6 +2166,13 @@ def impact_assessment_value(location_id, hazard_percent=None):
         hazard_percent=current.get('risk_percent')
     comm=community_signal_value(location_id)
     assets=[i for i in INFRA if i['location_id']==location_id]
+    if not assets and x.get('population_exposed') is None:
+        return {
+            'location_id':location_id,'available':False,'hazard_index':hazard_percent,'impact_score':None,'priority':'UNKNOWN',
+            'community_signal':comm['score'],'assets_at_risk':0,'population_exposed':None,
+            'data_status':'NOT_CONFIGURED','asset_source':None,
+            'interpretation':'Exposure assessment is unavailable until authoritative assets and population data are configured.'
+        }
     if hazard_percent is None:
         return {
             'location_id':location_id,'available':False,'hazard_index':None,'impact_score':None,'priority':'UNKNOWN',
@@ -2308,7 +2250,7 @@ def response_plan(location_id:int):
     return {
         'location_id':location_id,'location':f"{x['name']}, {x['state']}",'assessment_state':current.get('assessment_status'),
         'impact':imp,'routing_suggestion':route,'recommended_action':action,
-        'route_policy':'Prototype routing suggestion only; it is never labelled safe without verified closure, hazard and shelter datasets.',
+        'route_policy':'Route guidance is unavailable unless verified road, closure and shelter datasets are configured.',
         'checklist':['Review source freshness and missing inputs','Verify field/community evidence','Escalate draft advisory to a qualified reviewer','Confirm official road/shelter information before any movement recommendation','Track acknowledgement and field outcome'],
         'ew4all_pillars':{'risk_knowledge':'GIS + traceable assessment','monitoring_forecasting':'weather + optional real telemetry','warning_communication':'reviewed advisory lifecycle','preparedness_response':'operator checklist + audit history'},
         'human_decision_gate':{'required':True,'policy':'PRAHARI provides decision support; competent geological/emergency authorities authorize public warnings, evacuation and road closure.'}
@@ -2354,29 +2296,14 @@ def ingest_telemetry(t:TelemetryInput, role:str=Depends(resolve_role)):
                       'model_version':BASELINE_VERSION,'missing_inputs':baseline.missing,'factors':baseline.reasons,'limitations':baseline.limitations},
         'draft_advisory_created':bool(draft or fused_draft),
         'alert':localized_alert(fused_draft or draft,'en') if (fused_draft or draft) else None,
-        'note':'SIMULATED_HACKATHON and MANUAL_TEST telemetry are stored for demo/testing but cannot escalate live advisories.'
+        'note':'Only REAL_SENSOR telemetry can influence live advisory escalation.'
     }
 
 @app.get('/api/iot/telemetry/latest', tags=['Edge & IoT'])
 def latest_iot(location_id:int=Query(...)):
     _loc(location_id); row=latest_telemetry(location_id)
-    return {'location_id':location_id,'available':bool(row),'telemetry':row,'note':'REAL_SENSOR is live field telemetry; SIMULATED_HACKATHON is explicitly demo data.'}
+    return {'location_id':location_id,'available':bool(row),'telemetry':row,'note':'Only REAL_SENSOR telemetry can influence live advisory escalation.'}
 
-@app.post('/api/iot/demo/{location_id}', tags=['Edge & IoT'])
-def demo_iot(location_id:int, role:str=Depends(resolve_role)):
-    require_role(role,'OPERATOR')
-    x=_loc(location_id)
-    # Explicit synthetic demonstration packet. It is stored as SIMULATED_HACKATHON and is excluded from live escalation.
-    replay=build_replay_packet(x)
-    rain=float(replay.get('rainfall_24h_mm') or 0)
-    wet=float(replay.get('soil_moisture_proxy_pct') or 0)
-    severity=max(0.0,min(1.0,(rain/200.0 + wet/100.0 + x['slope']/60.0)/3.0))
-    t=TelemetryInput(location_id=location_id,station_id=f"DEMO-{location_id:02d}",rainfall_intensity=round(max(2,rain/8),1),soil_moisture=wet,
-        tilt_deg=round(.4+severity*2.7,2),vibration_g=round(.05+severity*.38,3),pore_pressure_kpa=round(18+severity*68,1),
-        displacement_mm=round(.7+severity*10.5,2),battery_pct=94,quality=.96,source='SIMULATED_HACKATHON')
-    result=ingest_telemetry(t, role)
-    result['demo_mode']='SYNTHETIC_DEMONSTRATION'
-    return result
 
 @app.post('/api/geotech/factor-of-safety', tags=['Physics guardrail'])
 def factor_of_safety(g:GeoTechInput):
@@ -2555,4 +2482,4 @@ app.include_router(broadcast_routes(db, LOCATIONS, _alert_broadcast_text))
 
 
 from flood_api import routes as flood_routes
-app.include_router(flood_routes(db, LOCATIONS, lambda x: fetch_live_weather(x), build_replay_packet, localized_alert))
+app.include_router(flood_routes(db, LOCATIONS, lambda x: fetch_live_weather(x), localized_alert))

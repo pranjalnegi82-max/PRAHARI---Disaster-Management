@@ -34,28 +34,31 @@ def packet():
 
 
 def configured(client):
-    b=client.get('/api/flood/basins/1').json()
-    b.update(context_status='CONFIGURED', station_id='gauge-1', danger_stage_m=3)
+    b={
+        'name':'Verified test catchment',
+        'context_status':'CONFIGURED',
+        'provenance':'QA fixture representing operator-supplied verified configuration.',
+        'thresholds_mm':{'1':30,'3':60,'6':100},
+        'villages':[{'name':'Test settlement','lat':27.3314,'lon':88.6138}],
+        'slope_context':'QA terrain context',
+        'historical_events_source':'QA event inventory reference',
+        'station_id':'gauge-1',
+        'danger_stage_m':3,
+    }
     assert client.post('/api/flood/basins/1',json=b).status_code==200
     return b
 
 
-def test_demo_cannot_create_public_workflow_draft(client):
-    response=client.post('/api/flood/assessments/1?mode=replay')
-    assert response.status_code==201
-    r=response.json()
-    assert r['assessment']['level']=='CRITICAL'
-    assert r['assessment']['probability'] is None
-    assert r['assessment']['validated_lead_time_minutes'] is None
-    assert r['assessment']['source']=='Synthetic flash flood scenario'
-    assert client.post(f"/api/flood/records/{r['id']}/draft").status_code==409
-    assert len(client.get('/api/flood/history/1').json())==1
+def test_unconfigured_area_cannot_screen_or_record(client):
+    assert client.get('/api/flood/basins/1').status_code==409
+    assert client.get('/api/flood/screen/1').status_code==409
+    assert client.post('/api/flood/assessments/1').status_code==409
 
 
 @pytest.mark.parametrize('bad',[None,-1,float('nan'),float('inf')])
 def test_bad_rain_is_unknown(client,bad):
     p=packet();p['rain_forecast_1h_mm']=bad
-    r=assess(p,client.get('/api/flood/basins/1').json(),now=int(time.time()))
+    r=assess(p,configured(client),now=int(time.time()))
     assert r['level']=='UNKNOWN'
     assert 'rain_forecast_1h_mm' in r['missing']
 
@@ -63,7 +66,7 @@ def test_bad_rain_is_unknown(client,bad):
 def test_actual_zero_is_low_and_empty_window_is_missing(client):
     p=packet()
     for h in (1,3,6):p[f'rain_forecast_{h}h_mm']=0
-    assert assess(p,client.get('/api/flood/basins/1').json(),now=int(time.time()))['level']=='LOW'
+    assert assess(p,configured(client),now=int(time.time()))['level']=='LOW'
     assert main._complete_rain_window([],[],1) is None
     assert main._complete_rain_window([2,None,4],[0,1,2],3) is None
     assert main._complete_rain_window([0,0,0],[0,1,2],3)==0
@@ -81,10 +84,9 @@ def test_sensor_freshness_quality_source_and_matching(client):
 
 
 def test_auth_and_station_validation(client):
-    configured(client)
+    b=configured(client)
     main.app.dependency_overrides[resolve_role]=lambda:'FIELD_OFFICER'
-    assert client.post('/api/flood/assessments/1?mode=replay').status_code==403
-    b=client.get('/api/flood/basins/1').json()
+    assert client.post('/api/flood/assessments/1').status_code==403
     assert client.post('/api/flood/basins/1',json=b).status_code==403
     main.app.dependency_overrides[resolve_role]=lambda:'ADMIN'
     g={'station_id':'wrong','source':'REAL_SENSOR','observed_at':int(time.time()),'water_level_m':2,'quality':1}
@@ -118,15 +120,15 @@ def test_stale_missing_and_old_assessments_cannot_draft(client,monkeypatch):
 
 
 def test_config_validation_and_bad_location(client):
-    b=client.get('/api/flood/basins/1').json()
+    b=configured(client)
     b['thresholds_mm']={'1':30,'3':20,'6':100}
     assert client.post('/api/flood/basins/1',json=b).status_code==422
-    assert client.get('/api/flood/screen/999?mode=replay').status_code==404
+    assert client.get('/api/flood/screen/999').status_code==404
 
 
 def test_current_provider_time_must_be_fresh(client):
     p=packet();p['valid_at_epoch']=int(time.time())-20000
-    r=assess(p,client.get('/api/flood/basins/1').json(),now=int(time.time()))
+    r=assess(p,configured(client),now=int(time.time()))
     assert r['level']=='UNKNOWN'
     assert 'current_provider_timestamp' in r['missing']
 

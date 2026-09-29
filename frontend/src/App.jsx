@@ -15,7 +15,7 @@ const RISK = {
 };
 const NAV = ['Flash Floods', 'Overview', 'Risk Map', 'Reports & Alerts', 'Data & Settings'];
 const NAV_ICONS = { 'Flash Floods':'water', 'Overview':'home', 'Risk Map':'map', 'Reports & Alerts':'report', 'Data & Settings':'settings' };
-const STATE_LABEL = { CURRENT: 'Current', STALE: 'Cached / stale', MISSING: 'Missing', HISTORICAL_REPLAY: 'Historical replay', BASELINE_DEMO: 'Prototype baseline' };
+const STATE_LABEL = { CURRENT: 'Current', STALE: 'Stale', MISSING: 'Unavailable' };
 const RISK_COLOR = { LOW:'#2f855a', MODERATE:'#b7791f', HIGH:'#c05621', CRITICAL:'#c53030', UNKNOWN:'#718096' };
 
 const fmt = (v, digits=1) => v === null || v === undefined || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(digits);
@@ -115,7 +115,7 @@ function RiskMapView({locations, selected, onSelect, basemap='street', compact=f
     ? {url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr:'Tiles © Esri — visual basemap only'}
     : {url:'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attr:'© OpenStreetMap contributors'};
   return <div className={`map-wrap ${compact ? 'map-compact' : ''}`}>
-    <MapContainer center={[25.6, 92.7]} zoom={5} scrollWheelZoom={!compact} className="map-canvas">
+    <MapContainer center={[23.5, 80.5]} zoom={4} scrollWheelZoom={!compact} className="map-canvas">
       <TileLayer url={tiles.url} attribution={tiles.attr}/>
       <MapFocus location={selected}/>
       {locations.map(loc => <CircleMarker key={loc.id} center={[loc.lat, loc.lon]} radius={loc.id===selected?.id ? 12 : 9}
@@ -294,7 +294,7 @@ function PortalApp(){
 
 function AdminPortal({session,onLogout}) {
   const [view, setView] = useState('Flash Floods');
-  const [mode, setMode] = useState('live');
+  const mode = 'live';
   const [locations, setLocations] = useState([]);
   const [selectedId, setSelectedId] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -365,17 +365,13 @@ function AdminPortal({session,onLogout}) {
         <span className={`status-dot ${selected?.data_state==='CURRENT'?'online':'degraded'}`}/>
         <div><strong>{selected?.data_state==='CURRENT'?'Live context':'Data status'}</strong><small>{STATE_LABEL[selected?.data_state] || 'Waiting for source'}</small></div>
       </div>
-      <p className="sidebar-note">Decision-support prototype · SIH26192</p>
+      <p className="sidebar-note">Hilly-region command centre</p>
     </aside>
 
     <div className="app-frame">
       <header className="topbar">
         <LocationSelector locations={locations} selectedId={selectedId} onSelect={setSelectedId} compact/>
         <div className="top-actions">
-          <div className="mode-toggle compact" role="group" aria-label="Data mode">
-            <button className={mode==='live'?'active':''} onClick={()=>setMode('live')}>Live</button>
-            <button className={mode==='replay'?'active':''} onClick={()=>setMode('replay')}>Replay</button>
-          </div>
           <button className="icon-btn" onClick={()=>loadLocations(true)} disabled={refreshing} title="Refresh data" aria-label="Refresh data"><Icon name="refresh" size={18}/></button>
           <button className="icon-btn" onClick={()=>setView('Reports & Alerts')} title="Reports and alerts" aria-label="Reports and alerts"><Icon name="bell" size={18}/>{attention>0&&<span className="icon-count">{attention}</span>}</button>
           <div className="portal-identity" title="Admin Command Center"><span className="user-avatar">A</span><div><strong>Admin</strong><small>Command Center</small></div></div>
@@ -386,7 +382,7 @@ function AdminPortal({session,onLogout}) {
       <main className="workspace">
         {error && <ErrorBox message={error} onRetry={()=>loadLocations(true)}/>} 
         {loading ? <Loading/> : <>
-          {view==='Flash Floods' && <FlashFloodPanel key={`${selectedId}-${mode}`} selected={selected} mode={mode} onRefreshAlerts={loadSideData}/>}
+          {view==='Flash Floods' && <FlashFloodPanel key={selectedId} selected={selected} onRefreshAlerts={loadSideData}/>}
           {view==='Overview' && <Overview location={activeAssessment} locations={locations} alerts={unresolved} reports={reports} assessmentId={assessmentId} onAssess={runAssessment} onNavigate={setView} refreshing={refreshing} mode={mode}/>} 
           {view==='Risk Map' && <RiskMapPage locations={locations} selected={selected} onSelect={loc=>setSelectedId(loc.id)} onAssess={runAssessment} assessment={activeAssessment}/>} 
           {view==='Reports & Alerts' && <ReportsAlerts reports={reports} alerts={alerts} selected={selected} locations={locations} auth={auth} onRefresh={loadSideData}/>} 
@@ -404,8 +400,8 @@ function LocationSelector({locations, selectedId, onSelect, compact=false}) {
   useEffect(()=>{ if(selected) setQuery(`${selected.name}, ${selected.state}`); },[selectedId, locations.length]);
   const matches=locations.filter(x=>`${x.name} ${x.state}`.toLowerCase().includes(query.toLowerCase().trim())).slice(0,8);
   return <div className={`location-search ${compact?'location-search-compact':''}`}>
-    <label className="field location-select"><span className={compact?'sr-only':''}>Search / select area</span><span className="search-icon"><Icon name="search" size={17}/></span><input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search location in Northeast India…" aria-controls="location-results"/></label>
-    {query && selected && query !== `${selected.name}, ${selected.state}` && <div className="location-results" id="location-results">{matches.length?matches.map(x=><button key={x.id} onClick={()=>{onSelect(x.id);setQuery(`${x.name}, ${x.state}`)}}><strong>{x.name}</strong><span>{x.state}</span></button>):<span>No configured area matches. General geocoding is not connected yet.</span>}</div>}
+    <label className="field location-select"><span className={compact?'sr-only':''}>Search / select area</span><span className="search-icon"><Icon name="search" size={17}/></span><input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search monitored hilly region…" aria-controls="location-results"/></label>
+    {query && selected && query !== `${selected.name}, ${selected.state}` && <div className="location-results" id="location-results">{matches.length?matches.map(x=><button key={x.id} onClick={()=>{onSelect(x.id);setQuery(`${x.name}, ${x.state}`)}}><strong>{x.name}</strong><span>{x.state}</span></button>):<span>No monitored area matches.</span>}</div>}
   </div>;
 }
 
@@ -416,7 +412,7 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
   const missing = location.assessment_status === 'INSUFFICIENT_DATA' || location.data_state === 'MISSING';
   const newReports = reports.filter(r=>r.status==='NEW').length;
   const riskLevel = location.risk_level || 'UNKNOWN';
-  const dataDetail = mode==='replay' ? 'Historical replay' : (location.data_state==='CURRENT' ? 'Live / latest' : STATE_LABEL[location.data_state] || 'Unknown');
+  const dataDetail = location.data_state==='CURRENT' ? 'Live / latest' : STATE_LABEL[location.data_state] || 'Unknown';
 
   return <div className="overview-page">
     <section className="overview-hero" aria-labelledby="overview-title">
@@ -483,12 +479,6 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
         <RiskMapView locations={locations} selected={location} onSelect={()=>{}} compact/>
       </Panel>
     </div>
-
-    <details className="disclosure overview-disclosure"><summary>Technical details & limitations</summary><div className="disclosure-body">
-      <p><strong>Terrain context:</strong> bundled prototype point attributes until authoritative DEM-derived features are integrated.</p>
-      {(location.assessment_limitations||[]).map((x,i)=><p key={i}>{x}</p>)}
-      {location.experimental_model && <p><strong>Experimental ensemble:</strong> visible for research comparison only; synthetic/bootstrap training and not field-calibrated.</p>}
-    </div></details>
   </div>;
 }
 
@@ -583,7 +573,7 @@ function RiskMapPage({locations,selected,onSelect,onAssess,assessment}) {
             <Panel title={selected?`${selected.name}, ${selected.state}`:'Select an area'} actions={selected&&<button className="btn btn-primary" onClick={onAssess}>Record assessment</button>}>
               {selected && <><div className="detail-risk"><RiskBadge level={assessment?.risk_level || selected.risk_level}/><strong>{assessment?.risk_percent == null ? 'Index unavailable' : `${fmt(assessment.risk_percent,0)} / 100`}</strong></div>
               <StateBadge state={assessment?.data_state || selected.data_state}/>
-              <dl className="kv"><dt>24 h rain</dt><dd>{fmt(assessment?.rainfall ?? selected.rainfall)} mm</dd><dt>72 h antecedent rain</dt><dd>{fmt(assessment?.antecedent_rainfall_72h ?? selected.antecedent_rainfall_72h)} mm</dd><dt>Soil wetness</dt><dd>{fmt(assessment?.soil_moisture ?? selected.soil_moisture)}%</dd><dt>Slope context</dt><dd>{fmt(selected.slope)}° <Badge>prototype</Badge></dd></dl></>}
+              <dl className="kv"><dt>24 h rain</dt><dd>{fmt(assessment?.rainfall ?? selected.rainfall)} mm</dd><dt>72 h antecedent rain</dt><dd>{fmt(assessment?.antecedent_rainfall_72h ?? selected.antecedent_rainfall_72h)} mm</dd><dt>Soil wetness</dt><dd>{fmt(assessment?.soil_moisture ?? selected.soil_moisture)}%</dd></dl></>}
             </Panel>
             <details className="disclosure" open><summary>Assessment history</summary><div className="disclosure-body history-list">{history.length?history.slice(0,8).map(h=><div key={h.id}><RiskBadge level={h.risk_level}/><span>{h.mode}</span><span>{fmtTime(h.created_at)}</span></div>):<p className="muted">No recorded assessments yet.</p>}</div></details>
             <details className="disclosure"><summary>Forecast guidance</summary><div className="disclosure-body">{forecast?.available ? <div className="forecast-list">{forecast.points.map(p=><div key={p.horizon}><strong>{p.horizon}</strong><RiskBadge level={p.risk_level}/><span>{p.risk_index ?? '—'}/100</span></div>)}</div>:<p className="muted">{forecast?.note || 'Forecast guidance unavailable.'}</p>}<p className="fine">Screening trajectory only; not a calibrated probability forecast.</p></div></details>
@@ -754,13 +744,13 @@ function AlertsPane({alerts,auth,locations,onRefresh}) {
 }
 
 function DataSettings({system,sources,auth,selected,locations,session,onLogout,onAuthRefresh}) {
-  const [channels,setChannels]=useState(null); const [satellite,setSatellite]=useState(null); const [model,setModel]=useState(null); const [infra,setInfra]=useState([]); const [routes,setRoutes]=useState([]);
+  const [channels,setChannels]=useState(null); const [satellite,setSatellite]=useState(null);
   const [recipients,setRecipients]=useState([]); const [recipientError,setRecipientError]=useState(''); const [recipientMsg,setRecipientMsg]=useState('');
   const [recipientForm,setRecipientForm]=useState({name:'',phone_e164:'+91',location_id:selected?.id||'',language:'en',sms_enabled:true,consent_confirmed:false});
   const isAdmin=['ADMIN','DEV_OPERATOR'].includes(auth?.current_role);
   async function loadSettings(){
-    const tasks=await Promise.allSettled([get('/api/notification/channels'),selected?get(`/api/satellite/${selected.id}`):Promise.resolve(null),get('/api/research/model-card'),get('/api/infrastructure'),get('/api/routes'),get('/api/notification/recipients')]);
-    const [c,s,m,i,r,n]=tasks;if(c.status==='fulfilled')setChannels(c.value);if(s.status==='fulfilled')setSatellite(s.value);if(m.status==='fulfilled')setModel(m.value);if(i.status==='fulfilled')setInfra(i.value);if(r.status==='fulfilled')setRoutes(r.value);if(n.status==='fulfilled'){setRecipients(n.value);setRecipientError('');}else setRecipientError(n.reason?.message||'Admin key required to manage notification recipients.');
+    const tasks=await Promise.allSettled([get('/api/notification/channels'),selected?get(`/api/satellite/${selected.id}`):Promise.resolve(null),get('/api/notification/recipients')]);
+    const [c,s,n]=tasks;if(c.status==='fulfilled')setChannels(c.value);if(s.status==='fulfilled')setSatellite(s.value);if(n.status==='fulfilled'){setRecipients(n.value);setRecipientError('');}else setRecipientError(n.reason?.message||'Admin key required to manage notification recipients.');
   }
   useEffect(()=>{loadSettings();},[selected?.id,auth?.current_role]);
   useEffect(()=>{setRecipientForm(f=>({...f,location_id:selected?.id||''}));},[selected?.id]);
@@ -771,8 +761,8 @@ function DataSettings({system,sources,auth,selected,locations,session,onLogout,o
     <div className="settings-grid">
       <Panel title="Data sources" subtitle="Origin and operational status are shown explicitly."><div className="source-table" role="table">{sourceList.map(([id,s])=><div className="source-row" key={id}><div><strong>{s.name}</strong><span>{s.kind}</span></div><StateBadge state={s.status}/><div><span>{s.coverage}</span><small>{s.spatial_resolution}</small></div><a href={s.origin?.startsWith('http')?s.origin:undefined} target="_blank" rel="noreferrer">{s.origin}</a></div>)}</div><p className="fine">{sources?.policy}</p></Panel>
       <Panel title="System health"><div className="status-grid">{system?Object.entries(system).filter(([k])=>!['last_sync'].includes(k)).slice(0,14).map(([k,v])=><div key={k}><span>{k.replaceAll('_',' ')}</span><strong>{k==='database_storage'?`${v.backend} · ${v.storage.replaceAll('_',' ')}`:typeof v==='boolean'?(v?'Yes':'No'):String(v)}</strong></div>):<Loading/>}</div></Panel>
-      <Panel title="Admin portal session" subtitle={auth?.auth_required?'Protected admin session. Credentials remain in this browser session only.':'Local development mode is open; enable authentication before shared deployment.'}><div className="session-card"><span className="session-role"><Icon name="shield" size={18}/><strong>{auth?.current_role||session?.portal||'ADMIN'}</strong></span><div><span>Portal</span><strong>Administration & Command Center</strong></div><div><span>Scope</span><strong>All monitored areas</strong></div><button className="btn btn-secondary small" onClick={onLogout}><Icon name="logout" size={15}/> Sign out</button></div></Panel>
-      <Panel title="Notification channels" subtitle="Configuration status; delivery is confirmed by Twilio receipts."><div className="channel-list">{channels?Object.entries(channels).filter(([k])=>!['policy','status_callback','active_recipients'].includes(k)).map(([k,v])=><span key={k}><strong>{k}</strong>: {v.status} · {v.delivery}{v.opted_in_recipients!=null?` · ${v.opted_in_recipients} opted in`:''}</span>):<Loading/>}</div>{channels&&<div className="notification-summary"><span>Active recipients <strong>{channels.active_recipients??0}</strong></span><span>Status callback <strong>{channels.status_callback?'Configured':'Not configured'}</strong></span></div>}{!!channels?.sms?.issues?.length&&<div className="notice notice-warn"><strong>SMS setup needed</strong><ul>{channels.sms.issues.map(issue=><li key={issue}>{issue}</li>)}</ul><span>For Render, update the API service → Environment, then save and redeploy.</span></div>}<p className="fine">{channels?.policy}</p></Panel>
+      <Panel title="Admin portal session" subtitle={auth?.auth_required?'Protected admin session.':'Admin session'}><div className="session-card"><span className="session-role"><Icon name="shield" size={18}/><strong>{auth?.current_role||session?.portal||'ADMIN'}</strong></span><div><span>Portal</span><strong>Administration & Command Center</strong></div><div><span>Scope</span><strong>All monitored areas</strong></div><button className="btn btn-secondary small" onClick={onLogout}><Icon name="logout" size={15}/> Sign out</button></div></Panel>
+      <Panel title="Notification channels" subtitle="Configuration status; delivery is confirmed by Twilio receipts."><div className="channel-list">{channels?Object.entries(channels).filter(([k])=>!['policy','status_callback','active_recipients'].includes(k)).map(([k,v])=><span key={k}><strong>{k}</strong>: {v.status} · {v.delivery}{v.opted_in_recipients!=null?` · ${v.opted_in_recipients} opted in`:''}</span>):<Loading/>}</div>{channels&&<div className="notification-summary"><span>Active recipients <strong>{channels.active_recipients??0}</strong></span><span>Status callback <strong>{channels.status_callback?'Configured':'Not configured'}</strong></span></div>}{!!channels?.sms?.issues?.length&&<div className="notice notice-warn"><strong>SMS unavailable</strong><ul>{channels.sms.issues.map(issue=><li key={issue}>{issue}</li>)}</ul></div>}<p className="fine">{channels?.policy}</p></Panel>
     </div>
 
     <Panel title="Civilian SMS registry" subtitle="Field officers register opted-in civilians by posting; admins retain oversight and emergency correction access." className="recipient-panel">
@@ -791,11 +781,6 @@ function DataSettings({system,sources,auth,selected,locations,session,onLogout,o
       <p className="fine">PRAHARI never sends to arbitrary numbers. SMS delivery is restricted to this consented directory and is logged per recipient.</p>
     </Panel>
 
-    <details className="disclosure"><summary>Twilio setup & delivery behavior</summary><div className="disclosure-body"><p>On Render, configure SMS in the API service’s Environment settings and redeploy. For local development, use the project <code>.env</code>. Credentials belong only on the backend.</p><p>Set <code>PRAHARI_SMS_ENABLED=true</code>, <code>PRAHARI_TWILIO_ACCOUNT_SID</code>, <code>PRAHARI_TWILIO_AUTH_TOKEN</code>, and either <code>PRAHARI_TWILIO_SMS_FROM</code> or <code>PRAHARI_TWILIO_MESSAGING_SERVICE_SID</code>.</p><p>Delivery status callbacks require a public HTTPS base URL. For a local demo, the admin can refresh delivery status manually. Use View SMS delivery details to inspect provider errors before retrying failed messages.</p><p>For India SMS, sender/DLT requirements depend on the route and account setup; finish provider compliance before relying on this for public deployment.</p></div></details>
-    <details className="disclosure"><summary>Satellite & post-event detection roadmap</summary><div className="disclosure-body"><p><strong>Current:</strong> {satellite?.pipeline_status || 'Visual basemap context only'}.</p><p>{satellite?.detection_module?.note}</p><p>Landslide4Sense-style semantic segmentation remains a separate post-event inventory capability and is not represented as future-risk forecasting.</p></div></details>
-    <details className="disclosure"><summary>Experimental ML model</summary><div className="disclosure-body"><p><strong>{model?.model_type || 'Research ensemble'}</strong></p><p>{model?.warning || 'Experimental model is not field calibrated.'}</p><p className="fine">Primary operational UI uses the transparent screening baseline until a real NER dataset is trained and validated spatially/temporally.</p></div></details>
-    <details className="disclosure"><summary>Infrastructure & routing · prototype data</summary><div className="disclosure-body"><p>These modules are preserved but clearly marked as non-authoritative until verified GIS layers are connected.</p><div className="mini-list">{infra.filter(x=>x.location_id===selected?.id).map(x=><span key={`${x.type}-${x.name}`}>{x.type}: {x.name} · {x.data_status}</span>)}{routes.filter(x=>x.location_id===selected?.id).map(x=><span key={x.id}>Route suggestion: {x.route} · {x.status} · not a safety claim</span>)}</div></div></details>
-    <details className="disclosure"><summary>Reference adaptations & licensing</summary><div className="disclosure-body"><p>GLAS informed rainfall-history and data-provenance design. Landslide4Sense informed the separate post-event segmentation roadmap. The boosted-tree competition repository informed reproducible training organization. No third-party repository code is copied into the core application unless its license is recorded in the project documentation.</p></div></details>
   </div>;
 }
 

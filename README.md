@@ -1,17 +1,16 @@
-# PRAHARI v10.0.0
+# PRAHARI v11
 ## Flash Flood Prediction System for Hilly Regions using Multi-Source Data
 **SIH26192 · Disaster Management**
 
-PRAHARI combines an experimental flash flood screening workspace with supporting landslide assessment, field reports, IoT ingestion, village/ward context and a reviewed advisory/SMS workflow.
+PRAHARI is a multi-source flash-flood and mountain-hazard command centre for monitored hilly regions, with field reports, IoT ingestion, catchment context and a reviewed advisory/SMS workflow.
 
-### New in v10
-- **Flash Floods:** 1-, 3-, 6-hour rainfall windows with soil-wetness and antecedent-rainfall context.
-- **Catchment configuration:** settlement coordinates, source notes, local duration thresholds and registered water-level gauge.
-- **IoT:** freshness, quality and real/simulated provenance checks.
-- **Traceability:** persistent flood assessments, JSON export and idempotent advisory drafts.
-- **Role portals:** admin workflow and read-only field officer flood view.
-
-The default catchments/settlements and replay storm are **demonstration data**. Live weather remains point model data. The screening thresholds are uncalibrated; no flood probability, inundation boundary or validated evacuation lead time is claimed. Read [SIH26192_IMPLEMENTATION.md](SIH26192_IMPLEMENTATION.md) for implementation, limitations, APIs and the demo script.
+### v11 hardening
+- Flash-flood operation is live-only; synthetic replay has been removed from the operational workflow.
+- Catchment configuration is mandatory; the API no longer invents default settlements or thresholds.
+- Primary product scope is hilly regions rather than Northeast India.
+- Dashboard copy has been reduced to operational information instead of setup/tutorial text.
+- Research/demo ensemble, prototype infrastructure and route content are no longer surfaced as operational dashboard intelligence.
+- See [RESEARCH_GAP_AUDIT_V11.md](RESEARCH_GAP_AUDIT_V11.md) for the paper-by-paper gap synthesis and remaining scientific work.
 
 ## Run locally
 Windows: run `start_all.bat`.
@@ -61,4 +60,4 @@ npm run build
 | `backend/database_schema.py` | Compatible schema initialization |
 | `qa/test_flood.py` | Flood integration and safety regressions |
 
-Earlier version documents describe the preserved landslide/SMS/satellite modules. v10 requirements and current gaps are summarized in [FEATURE_STATUS.md](FEATURE_STATUS.md), [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) and [SIH26192_IMPLEMENTATION.md](SIH26192_IMPLEMENTATION.md). PRAHARI remains a research/hackathon decision-support prototype; public warnings and evacuation orders belong to authorized agencies.
+PRAHARI remains decision-support software. Public warnings and evacuation orders belong to authorized agencies.
