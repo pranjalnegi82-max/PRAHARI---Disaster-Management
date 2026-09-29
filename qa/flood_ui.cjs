@@ -9,9 +9,9 @@ const fs=require('node:fs');
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(()=>{sessionStorage.setItem('prahari_portal','ADMIN');sessionStorage.setItem('prahari_operator_key','test');});
  const location={id:1,name:'Gangtok',state:'Sikkim',lat:27.3314,lon:88.6138,data_state:'CURRENT',risk_level:'UNKNOWN',sources:[],factors:[]};
- const basin={name:'Verified test catchment',context_status:'CONFIGURED',provenance:'QA fixture',thresholds_mm:{1:30,3:60,6:100},villages:[{name:'Test settlement',lat:27.33,lon:88.61}],slope_context:'QA terrain',historical_events_source:'QA inventory',station_id:null,danger_stage_m:null};
+ const basin={name:'Gangtok monitoring area',context_status:'AUTO_SCREENING',provenance:'QA automatic screening profile',thresholds_mm:{1:30,3:60,6:100},villages:[{name:'Gangtok',lat:27.33,lon:88.61}],slope_context:'QA terrain',historical_events_source:'QA inventory',station_id:null,danger_stage_m:null};
  let saved=false;
- const result=()=>({level:'HIGH',status:'SCREENED',mode:'live',location:'Gangtok',data_state:'CURRENT',source:'QA live provider fixture',valid_time:'TEST',valid_at_epoch:1,fetched_at:1,created_at:1,basin,windows:[1,3,6].map(hours=>({hours,rainfall_mm:40,screening_threshold_mm:30,exceedance_ratio:1.33,level:'HIGH'})),missing:[],soil_wetness_proxy_pct:80,antecedent_rainfall_72h_mm:240,sensor:null,sensor_used:false,version:'flood-screen-v1.0'});
+ const result=()=>({level:'HIGH',status:'SCREENED',mode:'live',location:'Gangtok',data_state:'CURRENT',source:'QA live provider fixture',valid_time:'TEST',valid_at_epoch:1,fetched_at:1,created_at:1,basin,windows:[1,3,6].map(hours=>({hours,rainfall_mm:40,screening_threshold_mm:30,exceedance_ratio:1.33,level:'HIGH'})),missing:[],soil_wetness_proxy_pct:80,antecedent_rainfall_72h_mm:240,terrain_slope_deg:31.2,terrain_elevation_m:1650,sensor:null,sensor_used:false,version:'flood-screen-v1.0'});
  await page.route('**/api/**',async route=>{
    const u=new URL(route.request().url()); let body={};
    if(u.pathname==='/api/auth/status')body={current_role:'ADMIN',portal:'ADMIN',authenticated:true};
@@ -36,6 +36,6 @@ const fs=require('node:fs');
  }
  await page.screenshot({path:'test-results/flood-mobile.png',fullPage:true});
  assert.deepEqual(errors,[]);
- console.log('Flood UI passed: live configured workflow, assessment history, and responsive layouts.');
+ console.log('Flood UI passed: automatic live screening, terrain context, assessment history, and responsive layouts.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});
