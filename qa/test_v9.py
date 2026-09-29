@@ -101,6 +101,23 @@ def test_stale_real_packet_is_labeled_stale(monkeypatch, client):
 def test_invalid_location_returns_404(client):
     assert client.get("/api/live/locations/999").status_code == 404
 
+def test_regional_live_list_uses_one_bulk_telemetry_lookup(monkeypatch):
+    main.LIVE_REGIONAL_CACHE["data"] = None
+    main.LIVE_REGIONAL_CACHE["ts"] = 0
+    monkeypatch.setattr(main, "_fetch_json_with_retries", lambda *args, **kwargs: [{} for _ in main.LOCATIONS])
+    monkeypatch.setattr(
+        main,
+        "fetch_live_weather",
+        lambda x, **kwargs: live_packet(x["id"], x["name"], x["state"]),
+    )
+    calls=[]
+    monkeypatch.setattr(main, "latest_telemetry_map", lambda ids: calls.append(tuple(ids)) or {})
+    monkeypatch.setattr(main, "latest_telemetry", lambda *_: (_ for _ in ()).throw(AssertionError("per-location telemetry lookup used")))
+    data=main.live_locs(force=True)
+    assert len(data) == len(main.LOCATIONS)
+    assert calls == [tuple(x["id"] for x in main.LOCATIONS)]
+
+
 
 def test_assessment_persists_and_exports(client):
     r = client.post("/api/assessments/1?mode=live")
