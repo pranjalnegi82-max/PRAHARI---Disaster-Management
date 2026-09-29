@@ -786,6 +786,22 @@ def init_db():
 
 init_db()
 
+def _load_persisted_locations():
+    try:
+        con=db()
+        rows=con.execute("SELECT id,name,state,country,lat,lon,source,source_ref FROM monitored_locations WHERE active=1 ORDER BY id").fetchall()
+        con.close()
+        known={x['id'] for x in LOCATIONS}
+        for row in rows:
+            item=dict(row)
+            if item['id'] not in known:
+                LOCATIONS.append(item); known.add(item['id'])
+    except Exception:
+        # Location persistence must not prevent the API from starting.
+        return
+
+_load_persisted_locations()
+
 
 def clamp(v, lo=0.0, hi=1.0):
     return min(max(v, lo), hi)
@@ -1456,11 +1472,71 @@ def export_assessment(assessment_id:int, format:Literal['json','csv']='json'):
     w.writerow(['inputs_json',json.dumps(inputs)]); w.writerow(['sources_json',json.dumps(sources)]); w.writerow(['factors_json',json.dumps(export['factors'])]); w.writerow(['limitations_json',json.dumps(export['limitations'])])
     return Response(buf.getvalue(),media_type='text/csv',headers={'Content-Disposition':f'attachment; filename="prahari_assessment_{assessment_id}.csv"'})
 
+class MonitoredLocationCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    state: str = Field(min_length=2, max_length=120)
+    lat: float = Field(ge=6.0, le=38.5)
+    lon: float = Field(ge=67.0, le=98.5)
+    source_ref: Optional[str] = Field(default=None, max_length=160)
+
 @app.get('/api/locations/search')
-def search_locations(q:str=Query('',max_length=80)):
-    needle=q.strip().lower()
-    items=[{'id':x['id'],'name':x['name'],'state':x['state'],'lat':x['lat'],'lon':x['lon']} for x in LOCATIONS if not needle or needle in x['name'].lower() or needle in x['state'].lower()]
-    return items[:20]
+def search_locations(q:str=Query('',min_length=2,max_length=80)):
+    query=q.strip()
+    params={'name':query,'count':10,'language':'en','format':'json','countryCode':'IN'}
+    try:
+        raw=_fetch_json_with_retries('https://geocoding-api.open-meteo.com/v1/search?'+urlencode(params),WEATHER_TIMEOUT_SECONDS,attempts=2)
+    except Exception as exc:
+        raise HTTPException(503,f'Location search is temporarily unavailable: {type(exc).__name__}')
+    existing={(round(float(x['lat']),4),round(float(x['lon']),4)):x['id'] for x in LOCATIONS}
+    out=[]
+    for item in (raw.get('results') or []):
+        if str(item.get('country_code') or '').upper()!='IN':
+            continue
+        lat=item.get('latitude'); lon=item.get('longitude')
+        if lat is None or lon is None: continue
+        state=item.get('admin1') or item.get('admin2') or 'India'
+        out.append({
+            'provider_id':str(item.get('id') or ''),'name':item.get('name') or query,'state':state,'country':'India',
+            'lat':float(lat),'lon':float(lon),'elevation_m':item.get('elevation'),
+            'timezone':item.get('timezone'),'monitored_location_id':existing.get((round(float(lat),4),round(float(lon),4)))
+        })
+    return out
+
+@app.post('/api/locations', status_code=201)
+def add_monitored_location(body:MonitoredLocationCreate, role:str=Depends(resolve_role)):
+    require_role(role,'ADMIN')
+    for x in LOCATIONS:
+        if abs(float(x['lat'])-body.lat)<0.0005 and abs(float(x['lon'])-body.lon)<0.0005:
+            return x
+    location_id=max([1000]+[int(x['id']) for x in LOCATIONS])+1
+    now=int(time.time())
+    item={'id':location_id,'name':body.name.strip(),'state':body.state.strip(),'country':'India',
+          'lat':float(body.lat),'lon':float(body.lon),'source':'OPEN_METEO_GEOCODING','source_ref':body.source_ref}
+    con=db()
+    try:
+        con.execute("INSERT INTO monitored_locations(id,name,state,country,lat,lon,source,source_ref,active,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)",
+                    (location_id,item['name'],item['state'],'India',item['lat'],item['lon'],item['source'],item['source_ref'],now,now))
+        con.commit()
+    finally: con.close()
+    LOCATIONS.append(item)
+    LIVE_REGIONAL_CACHE['data']=None; LIVE_REGIONAL_CACHE['ts']=0
+    return item
+
+@app.delete('/api/locations/{location_id}', status_code=204)
+def remove_monitored_location(location_id:int, role:str=Depends(resolve_role)):
+    require_role(role,'ADMIN')
+    target=next((x for x in LOCATIONS if x['id']==location_id),None)
+    if not target: raise HTTPException(404,'Location not found')
+    if location_id<=1000:
+        raise HTTPException(409,'Curated monitoring points cannot be removed')
+    con=db()
+    try:
+        con.execute("UPDATE monitored_locations SET active=0,updated_at=? WHERE id=?",(int(time.time()),location_id));con.commit()
+    finally: con.close()
+    LOCATIONS[:] = [x for x in LOCATIONS if x['id']!=location_id]
+    LIVE_WEATHER_CACHE.pop(location_id,None); TERRAIN_CACHE.pop(location_id,None)
+    LIVE_REGIONAL_CACHE['data']=None; LIVE_REGIONAL_CACHE['ts']=0
+    return Response(status_code=204)
 
 @app.get("/api/locations/{location_id}")
 def location(location_id:int):
