@@ -758,49 +758,97 @@ function AlertsPane({alerts,auth,locations,onRefresh}) {
   </Panel>;
 }
 
-function DataSettings({system,sources,auth,selected,locations,session,onLogout,onAuthRefresh}) {
-  const [channels,setChannels]=useState(null); const [satellite,setSatellite]=useState(null); const [model,setModel]=useState(null); const [infra,setInfra]=useState([]); const [routes,setRoutes]=useState([]);
-  const [recipients,setRecipients]=useState([]); const [recipientError,setRecipientError]=useState(''); const [recipientMsg,setRecipientMsg]=useState('');
+function DataSettings({system,sources,auth,selected,locations,session,onLogout}) {
+  const [channels,setChannels]=useState(null);
+  const [recipients,setRecipients]=useState([]);
+  const [recipientError,setRecipientError]=useState('');
+  const [recipientMsg,setRecipientMsg]=useState('');
   const [recipientForm,setRecipientForm]=useState({name:'',phone_e164:'+91',location_id:selected?.id||'',language:'en',sms_enabled:true,consent_confirmed:false});
   const isAdmin=['ADMIN','DEV_OPERATOR'].includes(auth?.current_role);
+
   async function loadSettings(){
-    const tasks=await Promise.allSettled([get('/api/notification/channels'),selected?get(`/api/satellite/${selected.id}`):Promise.resolve(null),get('/api/research/model-card'),get('/api/infrastructure'),get('/api/routes'),get('/api/notification/recipients')]);
-    const [c,s,m,i,r,n]=tasks;if(c.status==='fulfilled')setChannels(c.value);if(s.status==='fulfilled')setSatellite(s.value);if(m.status==='fulfilled')setModel(m.value);if(i.status==='fulfilled')setInfra(i.value);if(r.status==='fulfilled')setRoutes(r.value);if(n.status==='fulfilled'){setRecipients(n.value);setRecipientError('');}else setRecipientError(n.reason?.message||'Admin key required to manage notification recipients.');
+    const tasks=await Promise.allSettled([get('/api/notification/channels'),get('/api/notification/recipients')]);
+    if(tasks[0].status==='fulfilled')setChannels(tasks[0].value);
+    if(tasks[1].status==='fulfilled'){setRecipients(tasks[1].value);setRecipientError('');}
+    else setRecipientError(tasks[1].reason?.message||'Recipient registry unavailable.');
   }
-  useEffect(()=>{loadSettings();},[selected?.id,auth?.current_role]);
+  useEffect(()=>{loadSettings();},[auth?.current_role]);
   useEffect(()=>{setRecipientForm(f=>({...f,location_id:selected?.id||''}));},[selected?.id]);
-  async function addRecipient(e){e.preventDefault();setRecipientMsg('');setRecipientError('');try{const payload={...recipientForm,location_id:recipientForm.location_id===''?null:Number(recipientForm.location_id)};await post('/api/notification/recipients',payload);setRecipientMsg('SMS recipient enrolled. Only explicitly opted-in contacts will receive alerts.');setRecipientForm(f=>({...f,name:'',phone_e164:'+91',consent_confirmed:false}));await loadSettings();}catch(err){setRecipientError(err.message);}}
-  async function revokeRecipient(id){if(!window.confirm('Revoke this recipient from future PRAHARI SMS alerts?'))return;setRecipientError('');try{await patch(`/api/notification/recipients/${id}`,{consent_status:'REVOKED'});await loadSettings();}catch(err){setRecipientError(err.message);}}
-  const sourceList=sources?.sources ? Object.entries(sources.sources) : [];
-  return <div>{system?.database_storage?.warning&&<div className="notice notice-warn"><strong>Database storage needs attention.</strong><span>{system.database_storage.warning}</span></div>}<div className="page-title"><div><h1>Data & Settings</h1><p>Source provenance, system health, authorization and external alert delivery.</p></div></div>
+
+  async function addRecipient(e){
+    e.preventDefault();setRecipientMsg('');setRecipientError('');
+    try{
+      const payload={...recipientForm,location_id:recipientForm.location_id===''?null:Number(recipientForm.location_id)};
+      await post('/api/notification/recipients',payload);
+      setRecipientMsg('Recipient added.');
+      setRecipientForm(f=>({...f,name:'',phone_e164:'+91',consent_confirmed:false}));
+      await loadSettings();
+    }catch(err){setRecipientError(err.message);}
+  }
+
+  async function revokeRecipient(id){
+    if(!window.confirm('Remove this recipient from future SMS alerts?'))return;
+    setRecipientError('');
+    try{await patch('/api/notification/recipients/'+id,{consent_status:'REVOKED'});await loadSettings();}
+    catch(err){setRecipientError(err.message);}
+  }
+
+  const sourceList=sources?.sources?Object.entries(sources.sources):[];
+  const healthEntries=system?Object.entries(system).filter(([k])=>['version','database_storage','live_data_provider','risk_engine','auth_required','unacknowledged_alerts'].includes(k)):[];
+  return <div className="settings-page">
+    <div className="page-title"><div><h1>Data & Settings</h1><p>Live sources, system status and alert recipients</p></div></div>
+
     <div className="settings-grid">
-      <Panel title="Data sources" subtitle="Origin and operational status are shown explicitly."><div className="source-table" role="table">{sourceList.map(([id,s])=><div className="source-row" key={id}><div><strong>{s.name}</strong><span>{s.kind}</span></div><StateBadge state={s.status}/><div><span>{s.coverage}</span><small>{s.spatial_resolution}</small></div><a href={s.origin?.startsWith('http')?s.origin:undefined} target="_blank" rel="noreferrer">{s.origin}</a></div>)}</div><p className="fine">{sources?.policy}</p></Panel>
-      <Panel title="System health"><div className="status-grid">{system?Object.entries(system).filter(([k])=>!['last_sync'].includes(k)).slice(0,14).map(([k,v])=><div key={k}><span>{k.replaceAll('_',' ')}</span><strong>{k==='database_storage'?`${v.backend} · ${v.storage.replaceAll('_',' ')}`:typeof v==='boolean'?(v?'Yes':'No'):String(v)}</strong></div>):<Loading/>}</div></Panel>
-      <Panel title="Admin portal session" subtitle={auth?.auth_required?'Protected admin session. Credentials remain in this browser session only.':'Local development mode is open; enable authentication before shared deployment.'}><div className="session-card"><span className="session-role"><Icon name="shield" size={18}/><strong>{auth?.current_role||session?.portal||'ADMIN'}</strong></span><div><span>Portal</span><strong>Administration & Command Center</strong></div><div><span>Scope</span><strong>All monitored areas</strong></div><button className="btn btn-secondary small" onClick={onLogout}><Icon name="logout" size={15}/> Sign out</button></div></Panel>
-      <Panel title="Notification channels" subtitle="Configuration status; delivery is confirmed by Twilio receipts."><div className="channel-list">{channels?Object.entries(channels).filter(([k])=>!['policy','status_callback','active_recipients'].includes(k)).map(([k,v])=><span key={k}><strong>{k}</strong>: {v.status} · {v.delivery}{v.opted_in_recipients!=null?` · ${v.opted_in_recipients} opted in`:''}</span>):<Loading/>}</div>{channels&&<div className="notification-summary"><span>Active recipients <strong>{channels.active_recipients??0}</strong></span><span>Status callback <strong>{channels.status_callback?'Configured':'Not configured'}</strong></span></div>}{!!channels?.sms?.issues?.length&&<div className="notice notice-warn"><strong>SMS setup needed</strong><ul>{channels.sms.issues.map(issue=><li key={issue}>{issue}</li>)}</ul><span>For Render, update the API service → Environment, then save and redeploy.</span></div>}<p className="fine">{channels?.policy}</p></Panel>
+      <Panel title="Data sources">
+        <div className="source-table" role="table">{sourceList.map(([id,s])=><div className="source-row" key={id}>
+          <div><strong>{s.name}</strong><span>{s.kind}</span></div>
+          <StateBadge state={s.status}/>
+          <div><span>{s.coverage}</span><small>{s.spatial_resolution}</small></div>
+          {s.origin?.startsWith('http')?<a href={s.origin} target="_blank" rel="noreferrer">Source ↗</a>:<span>{s.origin}</span>}
+        </div>)}</div>
+      </Panel>
+
+      <Panel title="System">
+        <div className="status-grid">{healthEntries.length?healthEntries.map(([k,v])=><div key={k}>
+          <span>{k.replaceAll('_',' ')}</span>
+          <strong>{k==='database_storage'&&v?(v.backend+' · '+String(v.storage).replaceAll('_',' ')):typeof v==='boolean'?(v?'Yes':'No'):String(v??'—')}</strong>
+        </div>):<Loading/>}</div>
+      </Panel>
+
+      <Panel title="Alert delivery">
+        <div className="channel-list">{channels?Object.entries(channels).filter(([k])=>!['policy','status_callback','active_recipients'].includes(k)).map(([k,v])=><span key={k}><strong>{k.toUpperCase()}</strong> {v.status}{v.opted_in_recipients!=null?(' · '+v.opted_in_recipients+' recipients'):''}</span>):<Loading/>}</div>
+        {channels&&<div className="notification-summary"><span>Active recipients <strong>{channels.active_recipients??0}</strong></span><span>Delivery callback <strong>{channels.status_callback?'Connected':'Not connected'}</strong></span></div>}
+        {!!channels?.sms?.issues?.length&&<div className="notice notice-warn"><strong>SMS unavailable</strong><span>{channels.sms.issues.join(' ')}</span></div>}
+      </Panel>
+
+      <Panel title="Session">
+        <div className="session-card"><span className="session-role"><Icon name="shield" size={18}/><strong>{auth?.current_role||session?.portal||'ADMIN'}</strong></span><div><span>Scope</span><strong>All monitored areas</strong></div><button className="btn btn-secondary small" onClick={onLogout}><Icon name="logout" size={15}/> Sign out</button></div>
+      </Panel>
     </div>
 
-    <Panel title="Civilian SMS registry" subtitle="Field officers register opted-in civilians by posting; admins retain oversight and emergency correction access." className="recipient-panel">
-      {!isAdmin&&<div className="notice notice-warn">Field officers should use Reports & Alerts → Civilian enrollment. Admin access is required for the full cross-area registry.</div>}
-      {recipientError&&<div className="notice notice-error">{recipientError}</div>}{recipientMsg&&<div className="notice notice-warn">{recipientMsg}</div>}
+    <Panel title="SMS recipients" className="recipient-panel">
+      {recipientError&&<div className="notice notice-error">{recipientError}</div>}
+      {recipientMsg&&<div className="notice notice-success">{recipientMsg}</div>}
       {isAdmin&&<div className="recipient-layout">
         <form className="recipient-form" onSubmit={addRecipient}>
-          <div className="form-row"><label className="field"><span>Name / household / officer</span><input required maxLength={120} value={recipientForm.name} onChange={e=>setRecipientForm(f=>({...f,name:e.target.value}))}/></label><label className="field"><span>Phone number</span><input required placeholder="+919876543210" value={recipientForm.phone_e164} onChange={e=>setRecipientForm(f=>({...f,phone_e164:e.target.value}))}/></label></div>
-          <div className="form-row"><label className="field"><span>Alert area</span><select value={recipientForm.location_id} onChange={e=>setRecipientForm(f=>({...f,location_id:e.target.value}))}><option value="">All monitored areas</option>{locations.map(x=><option key={x.id} value={x.id}>{x.name}, {x.state}</option>)}</select></label><label className="field"><span>Language</span><select value={recipientForm.language} onChange={e=>setRecipientForm(f=>({...f,language:e.target.value}))}><option value="en">English</option><option value="hi">Hindi</option><option value="as">Assamese</option></select></label></div>
-          <div className="channel-checks"><span><strong>Delivery channel:</strong> Text SMS</span></div>
-          <label className="consent-check"><input type="checkbox" required checked={recipientForm.consent_confirmed} onChange={e=>setRecipientForm(f=>({...f,consent_confirmed:e.target.checked}))}/><span>I confirm this recipient explicitly opted in to PRAHARI emergency/advisory notifications and understands how to request removal.</span></label>
-          <button className="btn btn-primary">Add SMS recipient</button>
+          <div className="form-row">
+            <label className="field"><span>Name</span><input required maxLength={120} value={recipientForm.name} onChange={e=>setRecipientForm(f=>({...f,name:e.target.value}))}/></label>
+            <label className="field"><span>Phone</span><input required placeholder="+919876543210" value={recipientForm.phone_e164} onChange={e=>setRecipientForm(f=>({...f,phone_e164:e.target.value}))}/></label>
+          </div>
+          <div className="form-row">
+            <label className="field"><span>Area</span><select value={recipientForm.location_id} onChange={e=>setRecipientForm(f=>({...f,location_id:e.target.value}))}><option value="">All monitored areas</option>{locations.map(x=><option key={x.id} value={x.id}>{x.name}, {x.state}</option>)}</select></label>
+            <label className="field"><span>Language</span><select value={recipientForm.language} onChange={e=>setRecipientForm(f=>({...f,language:e.target.value}))}><option value="en">English</option><option value="hi">Hindi</option><option value="as">Assamese</option></select></label>
+          </div>
+          <label className="consent-check"><input type="checkbox" required checked={recipientForm.consent_confirmed} onChange={e=>setRecipientForm(f=>({...f,consent_confirmed:e.target.checked}))}/><span>Consent confirmed</span></label>
+          <button className="btn btn-primary">Add recipient</button>
         </form>
-        <div className="recipient-list">{recipients.length?recipients.map(r=>{const loc=locations.find(x=>x.id===r.location_id);return <div className={`recipient-row ${r.consent_status!=='ACTIVE'?'recipient-revoked':''}`} key={r.id}><div><strong>{r.name}</strong><span>{r.phone_e164}</span><small>{loc?`${loc.name}, ${loc.state}`:'All monitored areas'} · {r.language.toUpperCase()}{r.registered_by_officer?` · by ${r.registered_by_officer}`:''}</small></div><div className="recipient-channels">{r.sms_enabled&&<Badge>SMS</Badge>}<Badge tone={r.consent_status==='ACTIVE'?'good':'neutral'}>{r.consent_status}</Badge></div>{r.consent_status==='ACTIVE'&&<button className="btn btn-ghost small" onClick={()=>revokeRecipient(r.id)}>Revoke</button>}</div>}):<Empty title="No opted-in recipients" detail="Add opted-in phone numbers here before issuing SMS alerts."/>}</div>
+        <div className="recipient-list">{recipients.length?recipients.map(r=>{const loc=locations.find(x=>x.id===r.location_id);return <div className={'recipient-row '+(r.consent_status!=='ACTIVE'?'recipient-revoked':'')} key={r.id}>
+          <div><strong>{r.name}</strong><span>{r.phone_e164}</span><small>{loc?(loc.name+', '+loc.state):'All monitored areas'} · {r.language.toUpperCase()}</small></div>
+          <div className="recipient-channels"><Badge>SMS</Badge><Badge tone={r.consent_status==='ACTIVE'?'good':'neutral'}>{r.consent_status}</Badge></div>
+          {r.consent_status==='ACTIVE'&&<button className="btn btn-ghost small" onClick={()=>revokeRecipient(r.id)}>Revoke</button>}
+        </div>}):<Empty title="No recipients"/>}</div>
       </div>}
-      <p className="fine">PRAHARI never sends to arbitrary numbers. SMS delivery is restricted to this consented directory and is logged per recipient.</p>
     </Panel>
-
-    <details className="disclosure"><summary>Twilio setup & delivery behavior</summary><div className="disclosure-body"><p>On Render, configure SMS in the API service’s Environment settings and redeploy. For local development, use the project <code>.env</code>. Credentials belong only on the backend.</p><p>Set <code>PRAHARI_SMS_ENABLED=true</code>, <code>PRAHARI_TWILIO_ACCOUNT_SID</code>, <code>PRAHARI_TWILIO_AUTH_TOKEN</code>, and either <code>PRAHARI_TWILIO_SMS_FROM</code> or <code>PRAHARI_TWILIO_MESSAGING_SERVICE_SID</code>.</p><p>Delivery status callbacks require a public HTTPS base URL. For a local demo, the admin can refresh delivery status manually. Use View SMS delivery details to inspect provider errors before retrying failed messages.</p><p>For India SMS, sender/DLT requirements depend on the route and account setup; finish provider compliance before relying on this for public deployment.</p></div></details>
-    <details className="disclosure"><summary>Satellite & post-event detection roadmap</summary><div className="disclosure-body"><p><strong>Current:</strong> {satellite?.pipeline_status || 'Visual basemap context only'}.</p><p>{satellite?.detection_module?.note}</p><p>Landslide4Sense-style semantic segmentation remains a separate post-event inventory capability and is not represented as future-risk forecasting.</p></div></details>
-    <details className="disclosure"><summary>Experimental ML model</summary><div className="disclosure-body"><p><strong>{model?.model_type || 'Research ensemble'}</strong></p><p>{model?.warning || 'Experimental model is not field calibrated.'}</p><p className="fine">Primary operational UI uses the transparent screening baseline until a real NER dataset is trained and validated spatially/temporally.</p></div></details>
-    <details className="disclosure"><summary>Infrastructure & routing · prototype data</summary><div className="disclosure-body"><p>These modules are preserved but clearly marked as non-authoritative until verified GIS layers are connected.</p><div className="mini-list">{infra.filter(x=>x.location_id===selected?.id).map(x=><span key={`${x.type}-${x.name}`}>{x.type}: {x.name} · {x.data_status}</span>)}{routes.filter(x=>x.location_id===selected?.id).map(x=><span key={x.id}>Route suggestion: {x.route} · {x.status} · not a safety claim</span>)}</div></div></details>
-    <details className="disclosure"><summary>Reference adaptations & licensing</summary><div className="disclosure-body"><p>GLAS informed rainfall-history and data-provenance design. Landslide4Sense informed the separate post-event segmentation roadmap. The boosted-tree competition repository informed reproducible training organization. No third-party repository code is copied into the core application unless its license is recorded in the project documentation.</p></div></details>
   </div>;
 }
 
