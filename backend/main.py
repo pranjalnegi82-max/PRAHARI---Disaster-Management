@@ -1484,7 +1484,7 @@ def auth_status(x_prahari_key:Optional[str]=Header(default=None,alias='X-PRAHARI
 
 @app.get('/api/data/sources')
 def data_sources():
-    return {'sources':DATA_CATALOG,'policy':'CURRENT, STALE, MISSING and HISTORICAL_REPLAY states are explicit. Missing data never silently becomes low risk.'}
+    return {'sources':DATA_CATALOG,'policy':'CURRENT, STALE and MISSING source states are explicit. Missing data never silently becomes low risk.'}
 
 @app.get("/api/weather/{location_id}")
 def weather(location_id:int, force:bool=False):
