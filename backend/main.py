@@ -289,7 +289,10 @@ def terrain_context_map(force=False, data_override=None):
                     'source':'Open-Meteo elevation grid','method':v.get('method') or 'browser-derived terrain gradient'
                 }
         if out:
-            return out
+            merged=dict(TERRAIN_CONTEXT_CACHE.get('data') or {})
+            merged.update(out)
+            TERRAIN_CONTEXT_CACHE.update(ts=now,data=merged)
+            return merged
 
     persisted=_load_source_cache(TERRAIN_CACHE_KEY)
     if persisted and not force:
@@ -508,6 +511,10 @@ def fetch_live_weather(x, force=False, data_override=None):
             packet['source']='Open-Meteo direct browser feed'
             packet['transport']='BROWSER_DIRECT_RELAY'
             packet['note']='Current Open-Meteo data fetched directly by the authenticated browser because server egress was rate-limited. Provider payload was parsed server-side but not independently re-fetched.'
+            # Keep a short-lived in-memory copy so flood and landslide modules use
+            # the same real provider packet without a second throttled server call.
+            # Browser-relayed data is never written to the durable trusted cache.
+            LIVE_WEATHER_CACHE[x['id']]={'cached_at':now,'packet':packet}
         return packet
     except Exception as e:
         # Never invent live observations. Prefer a timestamp-preserving cached public packet;
@@ -1429,7 +1436,7 @@ def live_location(location_id:int, force:bool=False, mode:Literal['live']='live'
 
 @app.post("/api/live/browser-relay/{location_id}", tags=["System"])
 def browser_relay_live(location_id:int, body:dict, role:str=Depends(resolve_role)):
-    # Read-only prototype fallback. Authentication is still required in deployed
+    # Read-only provider transport fallback. Authentication is still required in deployed
     # mode, but FIELD_OFFICER is intentionally allowed because this endpoint does
     # not persist data or issue alerts.
     if AUTH_REQUIRED and role == 'PUBLIC':
@@ -1440,7 +1447,7 @@ def browser_relay_live(location_id:int, body:dict, role:str=Depends(resolve_role
     if str(body.get('provider') or '').upper() != 'OPEN_METEO' or not isinstance(body.get('payload'),dict):
         raise HTTPException(400,'Valid OPEN_METEO provider payload required')
     packet=fetch_live_weather(x, force=True, data_override=body['payload'])
-    terrain=terrain_context_map(data_override={str(location_id):body.get('terrain')}) .get(location_id) if isinstance(body.get('terrain'),dict) else terrain_context_map().get(location_id)
+    terrain=terrain_context_map(data_override={str(location_id):body.get('terrain')}).get(location_id) if isinstance(body.get('terrain'),dict) else terrain_context_map().get(location_id)
     result=enrich_with_live(x,_apply_terrain(packet,terrain))
     result['assessment_limitations']=list(result.get('assessment_limitations') or []) + [
         'Live weather was fetched directly by the authenticated browser because the hosting provider egress was throttled. The server parsed but did not independently re-fetch this provider response.'
@@ -2716,4 +2723,9 @@ app.include_router(broadcast_routes(db, LOCATIONS, _alert_broadcast_text))
 
 
 from flood_api import routes as flood_routes
-app.include_router(flood_routes(db, LOCATIONS, lambda x: fetch_live_weather(x), localized_alert))
+app.include_router(flood_routes(
+    db,
+    LOCATIONS,
+    lambda x: _apply_terrain(fetch_live_weather(x), terrain_context_map().get(x['id'])),
+    localized_alert,
+))
