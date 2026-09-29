@@ -1327,7 +1327,7 @@ def status():
         "api":"online",
         "database":"online",
         "database_storage":storage_status(DATABASE_URL, hosted=bool(os.getenv("RENDER"))),
-        "risk_engine": ml_status().get("engine", "transparent-fallback"),
+        "risk_engine":"transparent-screening",
         "alert_engine":"draft-advisory-lifecycle; operator review required",
         "browser_notifications":"frontend-ready",
         "satellite_intelligence":"Sentinel-2 live scene discovery/pairing + optional Landslide4Sense-compatible U-Net adapter; live 14-channel research patch preparation; inference requires verified weights and matching input profile",
@@ -1337,7 +1337,7 @@ def status():
         "satellite_nrt":"NASA GIBS VIIRS NRT with pre-warm local tile cache",
         "unacknowledged_alerts":alert_count,
         "last_sync":int(time.time()),
-        "historical_replay_mode":True,
+        "historical_replay_mode":False,
         "auth_required":AUTH_REQUIRED
     }
 
@@ -1378,43 +1378,11 @@ def live_location(location_id:int, force:bool=False, mode:Literal['live','replay
 
 @app.post("/api/live/browser-relay/{location_id}", tags=["System"])
 def browser_relay_live(location_id:int, body:dict, role:str=Depends(resolve_role)):
-    # Read-only prototype fallback. Authentication is still required in deployed
-    # mode, but FIELD_OFFICER is intentionally allowed because this endpoint does
-    # not persist data or issue alerts.
-    if AUTH_REQUIRED and role == 'PUBLIC':
-        raise HTTPException(403,'Authenticated PRAHARI session required')
-    x=next((z for z in LOCATIONS if z['id']==location_id),None)
-    if not x:
-        raise HTTPException(404,'Location not found')
-    if str(body.get('provider') or '').upper() != 'OPEN_METEO' or not isinstance(body.get('payload'),dict):
-        raise HTTPException(400,'Valid OPEN_METEO provider payload required')
-    packet=fetch_live_weather(x, force=True, data_override=body['payload'])
-    result=enrich_with_live(x,packet)
-    result['assessment_limitations']=list(result.get('assessment_limitations') or []) + [
-        'Live weather was fetched directly by the authenticated browser because the hosting provider egress was throttled. The server parsed but did not independently re-fetch this provider response.'
-    ]
-    return result
+    raise HTTPException(410,'Client-relayed weather is disabled; live assessments use server-fetched provider data only')
 
 @app.post("/api/assessments/{location_id}/browser-relay", tags=["Assessments"])
 def record_browser_relay_assessment(location_id:int, body:dict, role:str=Depends(resolve_role)):
-    require_role(role,'OPERATOR')
-    x=next((z for z in LOCATIONS if z['id']==location_id),None)
-    if not x:
-        raise HTTPException(404,'Location not found')
-    if str(body.get('provider') or '').upper() != 'OPEN_METEO' or not isinstance(body.get('payload'),dict):
-        raise HTTPException(400,'Valid OPEN_METEO provider payload required')
-    packet=fetch_live_weather(x, force=True, data_override=body['payload'])
-    result=enrich_with_live(x,packet)
-    result['assessment_limitations']=list(result.get('assessment_limitations') or []) + [
-        'Recorded from an authenticated browser-relayed Open-Meteo response because the hosting provider egress was throttled. This transport fallback should be replaced by server-managed provider access for production warning operations.'
-    ]
-    assessment_id=_save_assessment(location_id,'live-browser-relay',result)
-    draft=None
-    if result.get('assessment_status')=='ASSESSED' and result.get('risk_level') in ('HIGH','CRITICAL'):
-        draft=create_alert(location_id,f"{x['name']}, {x['state']}",result['risk_level'],result.get('risk_percent') or 0,
-                           'assessment-live-browser-relay',dedupe_seconds=300)
-    return {'assessment_id':assessment_id,'assessment':result,'draft_advisory':localized_alert(draft,'en') if draft else None,
-            'note':'Browser-relayed live assessment recorded with explicit transport provenance.'}
+    raise HTTPException(410,'Client-relayed assessments are disabled; record an assessment from the server-fetched live source')
 
 @app.get("/api/live/diagnostics/{location_id}", tags=["System"])
 def live_diagnostics(location_id:int, force:bool=True, role:str=Depends(resolve_role)):
@@ -1562,13 +1530,15 @@ def location(location_id:int):
 def predict(inp: RiskInput):
     values=inp.model_dump(exclude_none=True)
     if inp.method=='experimental_ensemble':
+        if not _test_fixtures_enabled():
+            raise HTTPException(410,'Synthetic/bootstrap research ensemble is disabled for operational use')
         result=risk_score(inp); p=float(result['probability']); level=result['level']
         return {
             'assessment_kind':'EXPERIMENTAL_BOOTSTRAP_ENSEMBLE','calibrated_probability':False,
             'risk_probability':None,'experimental_score_percent':round(p*100,1),'risk_percent':round(p*100,1),'risk_level':level,
             'recommended_action':action_for(level),'model_probabilities':result.get('model_probabilities',{}),'shap_local':result.get('shap_local',[]),
             'engine':result.get('engine'),'model_provenance':result.get('provenance'),
-            'limitations':['Synthetic/bootstrap training; not field-calibrated for Northeast India.','Score must not be described as an operational probability.'],
+            'limitations':['Synthetic/bootstrap training; automated-test use only.','Score is not an operational probability.'],
             'automatic_alert_triggered':False
         }
     base=baseline_assess({
@@ -2193,6 +2163,8 @@ def infrastructure():
 
 @app.get("/api/scenarios")
 def scenarios():
+    if not _test_fixtures_enabled():
+        raise HTTPException(404,'Test fixtures are disabled')
     return [
         {"name":"Cloudburst / saturated slope","values":{"rainfall":225,"antecedent_rainfall_72h":480,"cumulative_rainfall_7d":910,"effective_rainfall_11d":760,"rain_forecast_24h":95,"max_hourly_rain_24h":34,"soil_moisture":93,"slope":52,"elevation":1650,"historical_risk":0.86,"ndvi":0.55,"month":7}},
         {"name":"Severe monsoon watch","values":{"rainfall":165,"antecedent_rainfall_72h":390,"cumulative_rainfall_7d":720,"effective_rainfall_11d":640,"rain_forecast_24h":82,"max_hourly_rain_24h":27,"soil_moisture":84,"slope":43,"elevation":1350,"historical_risk":0.72,"ndvi":0.63,"month":8}},
@@ -2338,16 +2310,7 @@ SEVERITY_W = {'LOW':.2,'MODERATE':.45,'HIGH':.75,'CRITICAL':1.0}
 
 # Prototype assembly points and a tiny offline routing graph. These are not
 # official shelters; they demonstrate how verified emergency GIS would plug in.
-SHELTERS = {
-    1:[{'id':'G-A','name':'Prototype Assembly Point G-A','lat':27.344,'lon':88.606,'capacity':900}, {'id':'G-B','name':'Prototype Assembly Point G-B','lat':27.318,'lon':88.625,'capacity':700}],
-    2:[{'id':'A-A','name':'Prototype Assembly Point A-A','lat':23.742,'lon':92.710,'capacity':850}, {'id':'A-B','name':'Prototype Assembly Point A-B','lat':23.713,'lon':92.729,'capacity':650}],
-    3:[{'id':'K-A','name':'Prototype Assembly Point K-A','lat':25.690,'lon':94.100,'capacity':700}],
-    4:[{'id':'S-A','name':'Prototype Assembly Point S-A','lat':25.590,'lon':91.879,'capacity':900}],
-    5:[{'id':'I-A','name':'Prototype Assembly Point I-A','lat':27.098,'lon':93.590,'capacity':850}],
-    6:[{'id':'M-A','name':'Prototype Assembly Point M-A','lat':24.830,'lon':93.924,'capacity':800}],
-    7:[{'id':'D-A','name':'Prototype Assembly Point D-A','lat':25.200,'lon':93.012,'capacity':650}],
-    8:[{'id':'U-A','name':'Prototype Assembly Point U-A','lat':24.327,'lon':92.054,'capacity':600}],
-}
+SHELTERS = {}
 
 def _haversine(lat1,lon1,lat2,lon2):
     r=6371.0
@@ -2392,28 +2355,13 @@ def impact_assessment_value(location_id, hazard_percent=None):
     if hazard_percent is None and current:
         hazard_percent=current.get('risk_percent')
     comm=community_signal_value(location_id)
-    assets=[i for i in INFRA if i['location_id']==location_id]
-    if hazard_percent is None:
-        return {
-            'location_id':location_id,'available':False,'hazard_index':None,'impact_score':None,'priority':'UNKNOWN',
-            'community_signal':comm['score'],'assets_at_risk':len(assets),'population_exposed':x.get('population_exposed',0),
-            'data_status':'INCOMPLETE','asset_source':'PRAHARI prototype seed inventory',
-            'interpretation':'Impact scoring is unavailable until a traceable risk assessment exists. Bundled assets/population are prototype context, not an authoritative exposure inventory.'
-        }
-    asset_weights={'Hospital':1.0,'School':.85,'Bridge':.8,'Village':.75}
-    asset_score=min(100,sum(asset_weights.get(a['type'],.5)*22 for a in assets))
-    pop_score=min(100,x.get('population_exposed',0)/150.0)
-    road=next((r for r in ROUTES if r['location_id']==location_id),None)
-    road_score=90 if road and road['status']=='RESTRICTED' else (62 if road and road['status']=='CAUTION' else 28)
-    vulnerability=round(.42*asset_score+.33*road_score+.25*comm['score'],1)
-    impact=round(.55*float(hazard_percent)+.25*pop_score+.20*vulnerability,1)
-    priority='EMERGENCY' if impact>=80 else ('VERY HIGH' if impact>=65 else ('HIGH' if impact>=50 else ('WATCH' if impact>=35 else 'ROUTINE')))
+    # No population, road or asset score is fabricated. Exposure becomes
+    # available only when an authoritative inventory is connected.
     return {
-        'location_id':location_id,'available':True,'hazard_index':round(float(hazard_percent),1),
-        'exposure_score':round(pop_score,1),'vulnerability_score':vulnerability,'community_signal':comm['score'],
-        'impact_score':impact,'priority':priority,'population_exposed':x.get('population_exposed',0),'assets_at_risk':len(assets),
-        'asset_source':'PRAHARI prototype seed inventory','data_status':'BASELINE_DEMO_EXPOSURE',
-        'interpretation':'Prototype decision-support fusion only. Asset/population exposure is not an authoritative intersection or official loss estimate.'
+        'location_id':location_id,'available':False,'hazard_index':round(float(hazard_percent),1) if hazard_percent is not None else None,
+        'impact_score':None,'priority':'UNKNOWN','community_signal':comm['score'],
+        'assets_at_risk':None,'population_exposed':None,'data_status':'NO_VERIFIED_EXPOSURE_DATA',
+        'asset_source':None,'interpretation':'Verified exposure GIS is not connected for this monitoring point.'
     }
 
 def _route_plan(location_id, hazard_percent):
@@ -2479,6 +2427,8 @@ def response_plan(location_id:int):
 @app.post('/api/iot/telemetry', tags=['Edge & IoT'])
 def ingest_telemetry(t:TelemetryInput, role:str=Depends(resolve_role)):
     require_role(role,'OPERATOR')
+    if t.source!='REAL_SENSOR' and not _test_fixtures_enabled():
+        raise HTTPException(422,'Only REAL_SENSOR telemetry is accepted outside automated tests')
     x=_loc(t.location_id); now=int(time.time()); con=db(); cur=con.cursor()
     tid=insert_row(cur, 'INSERT INTO telemetry(location_id,station_id,rainfall_intensity,soil_moisture,tilt_deg,vibration_g,pore_pressure_kpa,displacement_mm,battery_pct,quality,source,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                 (t.location_id,t.station_id,t.rainfall_intensity,t.soil_moisture,t.tilt_deg,t.vibration_g,t.pore_pressure_kpa,t.displacement_mm,t.battery_pct,t.quality,t.source,now))
@@ -2522,11 +2472,13 @@ def ingest_telemetry(t:TelemetryInput, role:str=Depends(resolve_role)):
 @app.get('/api/iot/telemetry/latest', tags=['Edge & IoT'])
 def latest_iot(location_id:int=Query(...)):
     _loc(location_id); row=latest_telemetry(location_id)
-    return {'location_id':location_id,'available':bool(row),'telemetry':row,'note':'REAL_SENSOR is live field telemetry; SIMULATED_HACKATHON is explicitly demo data.'}
+    return {'location_id':location_id,'available':bool(row),'telemetry':row,'note':'Only authenticated REAL_SENSOR telemetry is accepted for operational monitoring.'}
 
 @app.post('/api/iot/demo/{location_id}', tags=['Edge & IoT'])
 def demo_iot(location_id:int, role:str=Depends(resolve_role)):
     require_role(role,'OPERATOR')
+    if not _test_fixtures_enabled():
+        raise HTTPException(404,'Test fixtures are disabled')
     x=_loc(location_id)
     # Explicit synthetic demonstration packet. It is stored as SIMULATED_HACKATHON and is excluded from live escalation.
     replay=build_replay_packet(x)
