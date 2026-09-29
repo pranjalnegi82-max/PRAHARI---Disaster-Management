@@ -243,6 +243,67 @@ def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
                 time.sleep(0.8 * (attempt+1))
     raise last_error or RuntimeError('Weather provider request failed')
 
+
+def _cache_key_terrain(location_id:int) -> str:
+    return f"open-meteo-elevation:{location_id}"
+
+def fetch_terrain_profile(x, force:bool=False, data_override=None):
+    """Fetch provider DEM elevations and derive a transparent local slope proxy.
+
+    No terrain value is invented when the provider is unavailable. A real cached
+    profile may be reused for up to 30 days because terrain is static.
+    """
+    now=int(time.time())
+    cached=TERRAIN_CACHE.get(x['id'])
+    if not force and cached and now-cached['cached_at'] < 7*86400:
+        return cached['profile']
+    persisted=_load_source_cache(_cache_key_terrain(x['id']))
+    if not force and persisted and now-int(persisted.get('fetched_at') or 0) <= 30*86400:
+        profile=dict(persisted['payload'])
+        profile['state']='STALE' if now-int(persisted.get('fetched_at') or 0) > 7*86400 else profile.get('state','CURRENT')
+        TERRAIN_CACHE[x['id']]={'cached_at':int(persisted.get('fetched_at') or now),'profile':profile}
+        return profile
+
+    lat=float(x['lat']); lon=float(x['lon'])
+    dlat=0.0045
+    dlon=dlat/max(0.25,math.cos(math.radians(lat)))
+    coords=[
+        (lat,lon),(lat+dlat,lon),(lat-dlat,lon),(lat,lon+dlon),(lat,lon-dlon),
+        (lat+dlat,lon+dlon),(lat+dlat,lon-dlon),(lat-dlat,lon+dlon),(lat-dlat,lon-dlon)
+    ]
+    params={'latitude':','.join(f'{a:.6f}' for a,_ in coords),'longitude':','.join(f'{b:.6f}' for _,b in coords)}
+    url='https://api.open-meteo.com/v1/elevation?'+urlencode(params)
+    try:
+        data=data_override if data_override is not None else _fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=2)
+        elevations=data.get('elevation') if isinstance(data,dict) else None
+        if not isinstance(elevations,list) or len(elevations)!=len(coords) or any(v is None for v in elevations):
+            raise ValueError('Elevation provider returned an incomplete neighborhood')
+        elevations=[float(v) for v in elevations]
+        center=elevations[0]
+        slopes=[]
+        for (plat,plon),z in zip(coords[1:],elevations[1:]):
+            dy=(plat-lat)*111320.0
+            dx=(plon-lon)*111320.0*math.cos(math.radians(lat))
+            horizontal=max(1.0,math.hypot(dx,dy))
+            slopes.append(math.degrees(math.atan(abs(z-center)/horizontal)))
+        profile={
+            'state':'CURRENT','source':'Open-Meteo Elevation API','source_url':'https://open-meteo.com/en/docs/elevation-api',
+            'fetched_at':now,'elevation_m':round(center,1),'local_slope_proxy_deg':round(max(slopes),2),
+            'mean_neighbor_slope_deg':round(sum(slopes)/len(slopes),2),'sample_radius_m':500,
+            'sample_count':len(coords)
+        }
+        TERRAIN_CACHE[x['id']]={'cached_at':now,'profile':profile}
+        _persist_source_cache(_cache_key_terrain(x['id']),'Open-Meteo Elevation',profile,None)
+        return profile
+    except Exception as exc:
+        persisted=_load_source_cache(_cache_key_terrain(x['id']))
+        if persisted and now-int(persisted.get('fetched_at') or 0) <= 30*86400:
+            profile=dict(persisted['payload']); profile['state']='STALE'; profile['error']=str(exc)
+            return profile
+        return {'state':'MISSING','source':'Open-Meteo Elevation API','source_url':'https://open-meteo.com/en/docs/elevation-api',
+                'fetched_at':None,'elevation_m':None,'local_slope_proxy_deg':None,'mean_neighbor_slope_deg':None,
+                'sample_radius_m':500,'sample_count':0,'error':str(exc)}
+
 def fetch_live_weather(x, force=False, data_override=None):
     now = int(time.time())
     cached = LIVE_WEATHER_CACHE.get(x['id'])
@@ -383,7 +444,7 @@ def fetch_live_weather(x, force=False, data_override=None):
             'rain_forecast_72h_mm': _sum_indices(precip,future_idx[:72]),
             'max_rain_probability_24h': max([float(hval(probs,i,0) or 0) for i in future_idx[:24]] or [0]),
             'forecast': points,
-            'note': 'Current conditions are model-derived. Soil moisture is converted to a wetness proxy for the prototype risk model.'
+            'note': 'Current conditions are model-derived. Soil moisture is converted to a wetness proxy for screening.'
         }
         if data_override is None:
             LIVE_WEATHER_CACHE[x['id']]={'cached_at':now,'packet':packet}
@@ -565,7 +626,7 @@ def _missing_or_cached_packet(x, error_message:str):
         'rain_now_mm':None,'cloud_cover_pct':None,'wind_kmh':None,'wind_gust_kmh':None,
         'soil_moisture_m3m3':None,'soil_moisture_proxy_pct':None,'rainfall_6h_mm':None,
         'rainfall_24h_mm':None,'antecedent_rainfall_72h_mm':None,'cumulative_rainfall_7d_mm':None,
-        'effective_rainfall_11d_mm':None,'max_hourly_rain_24h_mm':None,'rain_forecast_6h_mm':None,
+        'effective_rainfall_11d_mm':None,'max_hourly_rain_24h_mm':None,'rain_forecast_1h_mm':None,'rain_forecast_3h_mm':None,'rain_forecast_6h_mm':None,
         'rain_forecast_24h_mm':None,'rain_forecast_48h_mm':None,'rain_forecast_72h_mm':None,
         'max_rain_probability_24h':None,'forecast':[],
         'note':'Live source unavailable and no sufficiently fresh cached observation exists. No values were fabricated.'
