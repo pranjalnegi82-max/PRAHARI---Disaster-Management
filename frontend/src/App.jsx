@@ -481,7 +481,7 @@ function Overview({location, locations, alerts, reports, assessmentId, onAssess,
     <section className="summary-strip" aria-label="Current observation summary">
       <StatCard icon="alert" label="Current risk" value={RISK[riskLevel]?.label || 'Unknown'} unit="" detail={location.risk_percent == null ? 'Insufficient data' : `${fmt(location.risk_percent,0)}/100 screening index`} tone={riskLevel==='LOW'?'green':riskLevel==='MODERATE'?'amber':riskLevel==='UNKNOWN'?'blue':'red'}/>
       <StatCard icon="rain" label="Rainfall · 24 h" value={fmt(location.rainfall)} unit=" mm" detail={`72 h: ${fmt(location.antecedent_rainfall_72h)} mm`} tone="blue"/>
-      <StatCard icon="water" label="Soil wetness" value={fmt(location.soil_moisture)} unit="%" detail={`Slope context: ${fmt(location.slope)}°`} tone="teal"/>
+      <StatCard icon="water" label="Soil wetness" value={fmt(location.soil_moisture)} unit="%" detail={`Terrain gradient: ${fmt(location.slope)}°`} tone="teal"/>
       <StatCard icon="data" label="Data status" value={dataDetail} unit="" detail={`${fmt(location.data_completeness_pct,0)}% complete`} tone={location.data_state==='CURRENT'?'green':'amber'}/>
     </section>
     {stale && <div className="notice notice-warn"><strong>Cached observations in use.</strong><span>Review source timestamps before operational decisions.</span></div>}
