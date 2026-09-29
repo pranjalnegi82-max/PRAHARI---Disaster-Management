@@ -118,6 +118,20 @@ def test_regional_live_list_uses_one_bulk_telemetry_lookup(monkeypatch):
     assert calls == [tuple(x["id"] for x in main.LOCATIONS)]
 
 
+def test_regional_provider_failure_uses_one_bulk_cache_lookup(monkeypatch):
+    main.LIVE_REGIONAL_CACHE["data"] = None
+    main.LIVE_REGIONAL_CACHE["ts"] = 0
+    monkeypatch.setattr(main, "_fetch_json_with_retries", lambda *args, **kwargs: (_ for _ in ()).throw(main.URLError("offline")))
+    calls=[]
+    monkeypatch.setattr(main, "_load_source_cache_map", lambda keys: calls.append(tuple(keys)) or {})
+    monkeypatch.setattr(main, "_load_source_cache", lambda *_: (_ for _ in ()).throw(AssertionError("per-location cache lookup used")))
+    monkeypatch.setattr(main, "latest_telemetry_map", lambda ids: {})
+    data=main.live_locs(force=True)
+    assert len(data) == len(main.LOCATIONS)
+    assert all(x["data_state"] == "MISSING" for x in data)
+    assert calls == [tuple(main._cache_key_weather(x["id"]) for x in main.LOCATIONS)]
+
+
 
 def test_assessment_persists_and_exports(client):
     r = client.post("/api/assessments/1?mode=live")
