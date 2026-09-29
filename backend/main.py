@@ -1005,7 +1005,7 @@ def satellite_packet(x):
         'pipeline_status':'SCENE_DISCOVERY_IMPLEMENTED','imagery_basemap':'NASA GIBS / Esri imagery when reachable',
         'terrain_basemap':'OpenTopoMap when reachable','analysis_mode':'SENTINEL2_SCENE_QA_PLUS_VISUAL_CONTEXT',
         'risk_level':x.get('risk_level','UNKNOWN'),'risk_percent':x.get('risk_percent'),
-        'terrain_context':{'slope_deg':x.get('slope'),'elevation_m':x.get('elevation'),'ndvi_baseline':x.get('ndvi'),'source_state':'BASELINE_DEMO'},
+        'terrain_context':{'slope_deg':x.get('slope'),'elevation_m':x.get('elevation'),'source_state':x.get('terrain_state','NOT_FETCHED'),'source':x.get('terrain_source')},
         'scene_discovery':{'provider':'Element 84 Earth Search','collection':'sentinel-2-l2a','status':'IMPLEMENTED',
                            'note':'PRAHARI searches real Sentinel-2 L2A acquisitions and identifies recent/reference scene pairs using acquisition date and cloud metadata.'},
         'detection_module':{'name':'Landslide4Sense-compatible post-event segmentation','status':'CHECK_MODEL_STATUS_ENDPOINT',
@@ -1139,7 +1139,7 @@ def satellite_architecture():
             'model_status_endpoint':'/api/satellite/model/status',
             'preprocess_status_endpoint':'/api/satellite/preprocess/status'
         },
-        'susceptibility':{'status':'BASELINE_DEMO','note':'Current slope/elevation/NDVI context is seeded prototype data, not authoritative DEM-derived raster analysis.'},
+        'susceptibility':{'status':'SCREENING_ONLY','note':'Terrain context uses provider elevation samples; no validated susceptibility raster is claimed.'},
         'deformation_monitoring':{'status':'ROADMAP','note':'Sentinel-1/InSAR slope-deformation monitoring is intentionally separate from optical post-event detection.'},
         'research_basis':{
             'landslide4sense':'Official benchmark uses 12 Sentinel-2 multispectral bands plus slope and DEM at approximately 10 m pixels.',
@@ -2039,7 +2039,7 @@ def auth_status(x_prahari_key:Optional[str]=Header(default=None,alias='X-PRAHARI
 
 @app.get('/api/data/sources')
 def data_sources():
-    return {'sources':DATA_CATALOG,'policy':'CURRENT, STALE, MISSING and HISTORICAL_REPLAY states are explicit. Missing data never silently becomes low risk.'}
+    return {'sources':DATA_CATALOG,'policy':'CURRENT, STALE and MISSING source states are explicit. Missing data never silently becomes low risk.'}
 
 @app.get("/api/weather/{location_id}")
 def weather(location_id:int, force:bool=False):
@@ -2527,9 +2527,10 @@ def _tile_xy(lon,lat,z):
     x=int((lon+180)/360*n); y=int((1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*n)
     return x,y
 
-def _ner_tiles(min_zoom=4,max_zoom=6):
-    # Deliberately limited to low zooms for fast presentation-grade coverage.
-    west,south,east,north=87.0,21.0,98.5,31.2; out=[]
+def _india_tiles(min_zoom=4,max_zoom=6):
+    # Low-zoom cache covers India so western, central, northeastern and peninsular
+    # hill systems share the same satellite context.
+    west,south,east,north=68.0,6.0,98.5,38.0; out=[]
     for z in range(min_zoom,max_zoom+1):
         x1,y2=_tile_xy(west,south,z); x2,y1=_tile_xy(east,north,z)
         for x in range(min(x1,x2),max(x1,x2)+1):
@@ -2552,7 +2553,7 @@ def _cached_dates():
     return sorted([d.name for d in TILE_CACHE.iterdir() if d.is_dir() and len(d.name)==10], reverse=True) if TILE_CACHE.exists() else []
 
 def _cache_status(max_zoom=6):
-    active=_active_sat_date(); tiles=_ner_tiles(4,max_zoom); dates=[active]+[d for d in _cached_dates() if d!=active]
+    active=_active_sat_date(); tiles=_india_tiles(4,max_zoom); dates=[active]+[d for d in _cached_dates() if d!=active]
     best_date=active; best_cached=0
     for date in dates:
         n=sum(1 for z,y,x in tiles if _tile_path(date,z,y,x).exists())
@@ -2565,7 +2566,7 @@ def satellite_cache_status(max_zoom:int=6):
 
 @app.post('/api/satellite/cache/warm', tags=['Satellite / Offline'])
 def satellite_cache_warm(max_zoom:int=6):
-    max_zoom=max(4,min(7,max_zoom)); date=_active_sat_date(); tiles=_ner_tiles(4,max_zoom); failures=[]; downloaded=0; start=time.time()
+    max_zoom=max(4,min(7,max_zoom)); date=_active_sat_date(); tiles=_india_tiles(4,max_zoom); failures=[]; downloaded=0; start=time.time()
     def one(t):
         z,y,x=t
         try: return t,_fetch_tile(date,z,y,x,timeout=5)[1],None
