@@ -227,7 +227,7 @@ def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
     last_error=None
     for attempt in range(max(1, attempts)):
         try:
-            req=UrlRequest(url, headers={'User-Agent':'PRAHARI-SIH26192/10.0'})
+            req=UrlRequest(url, headers={'User-Agent':'PRAHARI/11.0'})
             with urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode('utf-8'))
         except HTTPError as exc:
@@ -1090,7 +1090,7 @@ def search_sentinel2_scenes(x:dict, days:int=120, max_cloud:float=45.0, limit:in
     req=UrlRequest(
         EARTH_SEARCH_STAC+'/search',
         data=json.dumps(payload).encode('utf-8'),
-        headers={'Content-Type':'application/json','Accept':'application/geo+json','User-Agent':'PRAHARI-SIH26192/10.0'},
+        headers={'Content-Type':'application/json','Accept':'application/geo+json','User-Agent':'PRAHARI/11.0'},
         method='POST'
     )
     try:
@@ -1315,7 +1315,7 @@ def startup_seed():
 
 @app.get("/")
 def root():
-    return {"service":"PRAHARI","status":"ok","version":"10.0.0","mode":"traceable-advisory-decision-support"}
+    return {"service":"PRAHARI","status":"ok","version":"11.0.0","mode":"live-hilly-region-monitoring"}
 
 
 @app.get("/api/system/status")
@@ -1344,21 +1344,18 @@ def status():
 
 @app.get("/api/ml/status")
 def machine_learning_status():
-    return ml_status()
-
+    return {
+        "status":"NOT_DEPLOYED",
+        "operational":False,
+        "reason":"No spatially and temporally validated all-hilly-region susceptibility model is deployed."
+    }
 
 @app.get("/api/ml/feature-importance")
 def machine_learning_feature_importance():
-    st = ml_status()
-    fi = st.get("feature_importance") or {}
-    return [
-        {"feature": key, "importance": value}
-        for key, value in sorted(fi.items(), key=lambda item: item[1], reverse=True)
-    ]
+    return []
 
 
 @app.get("/api/locations")
-@app.get("/api/sample-locations")
 def locations():
     return locs()
 
@@ -2096,21 +2093,12 @@ def forecast_risk(location_id:int):
 
 @app.get("/api/research/model-card")
 def research_model_card():
-    st=ml_status()
     return {
-        'project':'PRAHARI',
-        'engine':st.get('engine'),
-        'model_type':st.get('model_type'),
-        'features':st.get('features',[]),
-        'weights':st.get('weights',{}),
-        'monotone_constraints':st.get('monotone_constraints',{}),
-        'local_explainability':st.get('local_explainability'),
-        'validation':st.get('validation'),
-        'bootstrap_metrics':st.get('bootstrap_metrics',{}),
-        'provenance':st.get('provenance'),
-        'research_basis':st.get('research_basis',[]),
-        'production_path':st.get('production_path'),
-        'warning':'Bootstrap metrics are not real-world landslide accuracy.'
+        "project":"PRAHARI",
+        "status":"NOT_OPERATIONAL",
+        "model_type":None,
+        "validation":None,
+        "warning":"A flood-susceptibility model will only be exposed after real inventory training, spatial/temporal holdout validation and calibration."
     }
 
 
@@ -2121,24 +2109,11 @@ def satellite_scenes():
 
 @app.get("/api/routes")
 def routes():
-    result=[]; by={x['id']:x for x in locs()}
-    for r in ROUTES:
-        x=by[r['location_id']]
-        result.append({**r,"risk_index":x.get('risk_percent'),"location":x['name'],"data_status":"BASELINE_DEMO",
-                       "source":"PRAHARI prototype route inventory","safety_claim":False,
-                       "warning":"Routing context is demonstrative only. Verify official road closure and hazard data before operational use."})
-    return result
-
+    return []
 
 @app.get("/api/infrastructure")
 def infrastructure():
-    by={x['id']:x for x in locs()}; out=[]
-    for i in INFRA:
-        x=by[i['location_id']]
-        out.append({**i,"location":x['name'],"risk_level":x.get('risk_level'),"risk_index":x.get('risk_percent'),
-                    "data_status":"BASELINE_DEMO","source":"PRAHARI prototype asset inventory","verified_intersection":False,
-                    "warning":"Asset records are seed data; no authoritative GIS intersection is claimed."})
-    return out
+    return []
 
 
 @app.get("/api/scenarios")
@@ -2398,8 +2373,8 @@ def response_plan(location_id:int):
     return {
         'location_id':location_id,'location':f"{x['name']}, {x['state']}",'assessment_state':current.get('assessment_status'),
         'impact':imp,'routing_suggestion':route,'recommended_action':action,
-        'route_policy':'Prototype routing suggestion only; it is never labelled safe without verified closure, hazard and shelter datasets.',
-        'checklist':['Review source freshness and missing inputs','Verify field/community evidence','Escalate draft advisory to a qualified reviewer','Confirm official road/shelter information before any movement recommendation','Track acknowledgement and field outcome'],
+        'route_policy':'No route is generated until verified road-closure and shelter GIS are connected.',
+        'checklist':[],
         'ew4all_pillars':{'risk_knowledge':'GIS + traceable assessment','monitoring_forecasting':'weather + optional real telemetry','warning_communication':'reviewed advisory lifecycle','preparedness_response':'operator checklist + audit history'},
         'human_decision_gate':{'required':True,'policy':'PRAHARI provides decision support; competent geological/emergency authorities authorize public warnings, evacuation and road closure.'}
     }
@@ -2541,7 +2516,7 @@ def _fetch_tile(date,z,y,x,timeout=4):
     path=_tile_path(date,z,y,x)
     if path.exists() and path.stat().st_size>500: return path,False
     path.parent.mkdir(parents=True,exist_ok=True)
-    req=Request(_nasa_url(date,z,y,x),headers={'User-Agent':'PRAHARI-SIH26192/10.0'})
+    req=Request(_nasa_url(date,z,y,x),headers={'User-Agent':'PRAHARI/11.0'})
     with urlopen(req,timeout=timeout) as resp:
         data=resp.read(2_000_000)
         ctype=(resp.headers.get('Content-Type') or '').lower()
@@ -2617,19 +2592,27 @@ def research_evidence_matrix():
 
 @app.get('/api/system/health', tags=['System'])
 def system_health_v8():
-    st=ml_status(); cache=_cache_status(6); con=db(); tele=con.execute('SELECT COUNT(*) n FROM telemetry').fetchone()['n']; con.close()
-    return {'project':'PRAHARI','api_version':'10.0.0','status':'READY','ml_engine':st.get('engine'),'ml_loaded':st.get('model_loaded'),
-            'weather':'LIVE_OR_TRANSPARENT_FALLBACK','satellite':{'offline_lite':'READY','local_nasa_cache_pct':cache['ready_pct'],'nasa_direct':'OPTIONAL'},
-            'edge_iot':{'ingest_api':'READY','telemetry_records':tele},'people_centred_ews':'READY','impact_based_warning':'READY','offline_response_graph':'READY'}
+    cache=_cache_status(6)
+    con=db(); tele=con.execute('SELECT COUNT(*) n FROM telemetry').fetchone()['n']; con.close()
+    return {
+        'project':'PRAHARI','api_version':'11.0.0','status':'READY',
+        'ml_engine':'NOT_DEPLOYED','ml_loaded':False,
+        'weather':'LIVE_WITH_TRANSPARENT_STALE_OR_MISSING_STATES',
+        'terrain':'OPEN_METEO_ELEVATION',
+        'satellite':{'scene_discovery':'READY','local_nasa_cache_pct':cache['ready_pct']},
+        'edge_iot':{'ingest_api':'READY','telemetry_records':tele,'operational_source':'REAL_SENSOR_ONLY'},
+        'exposure_gis':'NOT_CONNECTED','routing_gis':'NOT_CONNECTED'
+    }
 
 @app.get('/api/research/data-readiness', tags=['Research'])
 def research_data_readiness():
-    return {'implemented_dynamic':['peak 1h rainfall','24h rainfall','72h antecedent rainfall','7-day cumulative rainfall','11-day effective rainfall','24/48/72h forecast trajectory','model/field soil wetness','seasonality'],
-            'implemented_context':['slope','elevation','historical susceptibility','NDVI baseline','citizen precursor evidence','exposure/infrastructure'],
-            'sensor_ready':['rainfall intensity','soil moisture','tilt','vibration','pore pressure','displacement','battery/quality'],
-            'research_synthesis':['rainfall-regime classification','input-sensitivity uncertainty envelope','IoT deformation precursor trend','alert feedback metrics','human decision gate'],
-            'next_real_datasets':['lithology','lineament density','distance to faults/roads/drainage','TWI','SPI','STI','curvature','LULC','soil depth/texture','Sentinel-1 InSAR deformation','field geotechnical cohesion/friction'],
-            'principle':'Do not fabricate missing geospatial layers. Add them only when verified datasets are available.'}
+    return {
+        'live_dynamic':['1/3/6h forecast rainfall','24h rainfall','72h antecedent rainfall','model soil moisture','provider elevation/slope proxy'],
+        'optional_real_sensor':['water level','rainfall intensity','soil moisture','tilt','vibration','pore pressure','displacement'],
+        'available_context':['Sentinel-2 scene discovery','field reports','assessment/advisory audit trail'],
+        'not_connected':['watershed-mean gauge/radar/satellite rainfall fusion','verified flood inventory','hydrologic routing','2D inundation','exposure GIS','spatially validated susceptibility ML','conformal uncertainty'],
+        'policy':'Unavailable scientific inputs remain unavailable rather than being filled with demo values.'
+    }
 
 @app.get('/api/geofence/check', tags=['People-centred EWS'])
 def geofence_check(lat:float=Query(...,ge=-90,le=90), lon:float=Query(...,ge=-180,le=180), radius_km:float=Query(25,ge=1,le=100)):
