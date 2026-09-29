@@ -129,7 +129,7 @@ async function run() {
     await page.getByRole('status').filter({ hasText: 'Delivery statuses refreshed.' }).waitFor();
 
     await page.getByRole('button', { name: 'Data & Settings', exact: true }).click();
-    await page.getByText('SMS setup needed', { exact: true }).waitFor();
+    await page.getByText('SMS unavailable', { exact: true }).waitFor();
     await page.getByText(setupIssue, { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.screenshot({ path: path.join(out, 'sms-setup-SYNTHETIC.png'), fullPage: true });
