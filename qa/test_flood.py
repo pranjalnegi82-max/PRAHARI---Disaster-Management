@@ -84,10 +84,9 @@ def test_sensor_freshness_quality_source_and_matching(client):
 
 
 def test_auth_and_station_validation(client):
-    configured(client)
+    b=configured(client)
     main.app.dependency_overrides[resolve_role]=lambda:'FIELD_OFFICER'
     assert client.post('/api/flood/assessments/1').status_code==403
-    b=configured(client)
     assert client.post('/api/flood/basins/1',json=b).status_code==403
     main.app.dependency_overrides[resolve_role]=lambda:'ADMIN'
     g={'station_id':'wrong','source':'REAL_SENSOR','observed_at':int(time.time()),'water_level_m':2,'quality':1}
