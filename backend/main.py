@@ -381,7 +381,7 @@ def fetch_live_weather(x, force=False, data_override=None):
             'forecast':[],'note':'Live source unavailable and no sufficiently fresh cached observation exists. No values were fabricated.'
         }
 
-def enrich_with_live(x, packet):
+def enrich_with_live(x, packet, telemetry_row=None, load_telemetry=True):
     d=dict(x)
     availability=packet.get('availability') or ('CURRENT' if packet.get('live') else 'STALE' if packet.get('stale_public') else 'MISSING')
     d['data_state']=availability
@@ -409,10 +409,13 @@ def enrich_with_live(x, packet):
     d['soil_moisture_m3m3']=packet.get('soil_moisture_m3m3')
     d['month']=datetime.now().month
 
-    try:
-        tele=latest_telemetry(x['id']) if 'latest_telemetry' in globals() else None
-    except Exception:
-        tele=None
+    if load_telemetry:
+        try:
+            tele=latest_telemetry(x['id']) if 'latest_telemetry' in globals() else None
+        except Exception:
+            tele=None
+    else:
+        tele=telemetry_row
     fresh_tele=bool(tele and int(time.time())-int(tele.get('created_at') or 0) <= 1800)
     d['telemetry']=tele; d['telemetry_fresh']=fresh_tele
     if fresh_tele and tele.get('source')=='REAL_SENSOR':
@@ -465,7 +468,16 @@ def enrich_with_live(x, packet):
     return d
 
 def locs():
-    return [enrich_with_live(x, _missing_or_cached_packet(x, 'Live data not loaded')) for x in LOCATIONS]
+    telemetry = latest_telemetry_map([x['id'] for x in LOCATIONS]) if 'latest_telemetry_map' in globals() else {}
+    return [
+        enrich_with_live(
+            x,
+            _missing_or_cached_packet(x, 'Live data not loaded'),
+            telemetry_row=telemetry.get(x['id']),
+            load_telemetry=False,
+        )
+        for x in LOCATIONS
+    ]
 
 def _missing_or_cached_packet(x, error_message:str):
     """Return a real cached packet when fresh enough, otherwise explicit MISSING."""
@@ -529,7 +541,7 @@ def live_locs(force=False, mode='live'):
     url='https://api.open-meteo.com/v1/forecast?'+urlencode(params)
     packets={}
     try:
-        batch=_fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=2)
+        batch=_fetch_json_with_retries(url, min(WEATHER_TIMEOUT_SECONDS, 10), attempts=1)
         if not isinstance(batch,list) or len(batch)!=len(LOCATIONS):
             raise ValueError(f'Unexpected Open-Meteo batch response shape: {type(batch).__name__}')
         for x,item in zip(LOCATIONS,batch):
@@ -539,7 +551,16 @@ def live_locs(force=False, mode='live'):
         for x in LOCATIONS:
             packets[x['id']]=_missing_or_cached_packet(x, err)
 
-    data=[enrich_with_live(x,packets[x['id']]) for x in LOCATIONS]
+    telemetry = latest_telemetry_map([x['id'] for x in LOCATIONS]) if 'latest_telemetry_map' in globals() else {}
+    data=[
+        enrich_with_live(
+            x,
+            packets[x['id']],
+            telemetry_row=telemetry.get(x['id']),
+            load_telemetry=False,
+        )
+        for x in LOCATIONS
+    ]
     LIVE_REGIONAL_CACHE['ts']=now
     LIVE_REGIONAL_CACHE['data']=data
     return data
@@ -2137,6 +2158,31 @@ def _loc(location_id):
 def latest_telemetry(location_id):
     con=db(); row=con.execute('SELECT * FROM telemetry WHERE location_id=? ORDER BY id DESC LIMIT 1',(location_id,)).fetchone(); con.close()
     return dict(row) if row else None
+
+def latest_telemetry_map(location_ids):
+    """Fetch the newest telemetry row for many locations with one DB connection."""
+    ids=[int(x) for x in location_ids if x is not None]
+    if not ids:
+        return {}
+    try:
+        placeholders=','.join('?' for _ in ids)
+        con=db()
+        rows=con.execute(
+            f'SELECT * FROM telemetry WHERE location_id IN ({placeholders}) ORDER BY location_id, id DESC',
+            tuple(ids),
+        ).fetchall()
+        con.close()
+    except Exception:
+        try:
+            con.close()
+        except Exception:
+            pass
+        return {}
+    latest={}
+    for row in rows:
+        d=dict(row)
+        latest.setdefault(d['location_id'], d)
+    return latest
 
 def community_signal_value(location_id, hours=48):
     x=_loc(location_id); cutoff=int(time.time())-hours*3600
