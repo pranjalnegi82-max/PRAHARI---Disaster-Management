@@ -1573,9 +1573,8 @@ def summary():
         "high_zones":high,
         "active_alerts":unacked,
         "citizen_reports":report_count,
-        "population_exposed_prototype":sum(x.get('population_exposed',0) for x in data if x.get('risk_level') in ('HIGH','CRITICAL')),
         "avg_risk_index":round(sum(float(x['risk_percent']) for x in assessed)/len(assessed),1) if assessed else None,
-        "note":"Risk index is an uncalibrated screening index; prototype exposure totals are not authoritative impact estimates."
+        "note":"Risk index is a transparent screening index; no population exposure total is produced without verified GIS."
     }
 
 
@@ -2092,27 +2091,8 @@ def satellite(location_id:int):
 
 @app.get("/api/forecast-risk/{location_id}")
 def forecast_risk(location_id:int):
-    """Transparent forecast-guidance trajectory, not a calibrated landslide forecast."""
-    base=next((z for z in LOCATIONS if z['id']==location_id),None)
-    if not base: raise HTTPException(404,'Location not found')
-    w=fetch_live_weather(base)
-    if w.get('availability')=='MISSING':
-        return {'location_id':location_id,'available':False,'state':'MISSING','points':[],
-                'note':'Weather source unavailable. PRAHARI does not fabricate a forecast trajectory.'}
-    rain24=w.get('rainfall_24h_mm'); rain72=w.get('antecedent_rainfall_72h_mm'); soil=w.get('soil_moisture_proxy_pct')
-    if any(v is None for v in [rain24,rain72,soil]):
-        return {'location_id':location_id,'available':False,'state':'INCOMPLETE','points':[],
-                'note':'Required weather fields are missing.'}
-    f6=w.get('rain_forecast_6h_mm') or 0; f24=w.get('rain_forecast_24h_mm') or 0; f48=w.get('rain_forecast_48h_mm') or f24; f72=w.get('rain_forecast_72h_mm') or f48
-    scenarios=[('NOW',rain24,0),('+6H',max(0,rain24*.78+f6),f6),('+24H',max(0,rain24*.28+f24),f24),('+48H',max(0,rain24*.12+max(0,f48-f24)),f48),('+72H',max(0,max(0,f72-f48)),f72)]
-    points=[]
-    for label,rain,added in scenarios:
-        res=baseline_assess({'rainfall_24h':rain,'antecedent_rainfall_72h':rain72+added*.55,'cumulative_rainfall_7d':(w.get('cumulative_rainfall_7d_mm') or rain72*1.7)+added*.7,
-                            'soil_moisture':min(100,soil+added*.08),'slope':base['slope'],'max_hourly_rain_24h':w.get('max_hourly_rain_24h_mm')})
-        points.append({'horizon':label,'risk_index':res.index,'risk_level':res.level,'assessment_status':res.status,'rainfall_24h_mm':round(rain,1),'forecast_added_mm':round(added,1)})
-    return {'location_id':location_id,'location':f"{base['name']}, {base['state']}",'available':True,'state':w.get('availability'),
-            'source':w.get('source'),'points':points,'assessment_kind':'TRANSPARENT_SCREENING_TRAJECTORY',
-            'note':'Scenario guidance derived from forecast rainfall and generic screening rules. Not a calibrated probability or official warning forecast.'}
+    _loc(location_id)
+    raise HTTPException(410,'Synthetic risk trajectories are disabled; use the live flash-flood screen with configured catchment thresholds')
 
 @app.get("/api/research/model-card")
 def research_model_card():
@@ -2447,12 +2427,13 @@ def ingest_telemetry(t:TelemetryInput, role:str=Depends(resolve_role)):
         draft=create_alert(x['id'],f"{x['name']}, {x['state']}",'CRITICAL',None,'edge-real-sensor-screen',dedupe_seconds=300)
 
     weather=fetch_live_weather(x)
+    terrain=fetch_terrain_profile(x)
     baseline=baseline_assess({
         'rainfall_24h':weather.get('rainfall_24h_mm'),
         'antecedent_rainfall_72h':weather.get('antecedent_rainfall_72h_mm'),
         'cumulative_rainfall_7d':weather.get('cumulative_rainfall_7d_mm'),
         'soil_moisture':t.soil_moisture if t.soil_moisture is not None else weather.get('soil_moisture_proxy_pct'),
-        'slope':x.get('slope'),'max_hourly_rain_24h':weather.get('max_hourly_rain_24h_mm'),
+        'slope':terrain.get('local_slope_proxy_deg'),'max_hourly_rain_24h':weather.get('max_hourly_rain_24h_mm'),
         'rainfall_intensity':t.rainfall_intensity,'tilt_deg':t.tilt_deg,'vibration_g':t.vibration_g,
         'pore_pressure_kpa':t.pore_pressure_kpa,'displacement_mm':t.displacement_mm,'telemetry_quality':t.quality,
     }, t.source)
@@ -2484,7 +2465,7 @@ def demo_iot(location_id:int, role:str=Depends(resolve_role)):
     replay=build_replay_packet(x)
     rain=float(replay.get('rainfall_24h_mm') or 0)
     wet=float(replay.get('soil_moisture_proxy_pct') or 0)
-    severity=max(0.0,min(1.0,(rain/200.0 + wet/100.0 + x['slope']/60.0)/3.0))
+    severity=max(0.0,min(1.0,(rain/200.0 + wet/100.0 + float(replay.get('terrain_slope_deg') or 0)/60.0)/3.0))
     t=TelemetryInput(location_id=location_id,station_id=f"DEMO-{location_id:02d}",rainfall_intensity=round(max(2,rain/8),1),soil_moisture=wet,
         tilt_deg=round(.4+severity*2.7,2),vibration_g=round(.05+severity*.38,3),pore_pressure_kpa=round(18+severity*68,1),
         displacement_mm=round(.7+severity*10.5,2),battery_pct=94,quality=.96,source='SIMULATED_HACKATHON')
