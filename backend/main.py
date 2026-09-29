@@ -121,6 +121,388 @@ DATA_CATALOG = {
     },
 }
 
+# ---- Live public-data integration -------------------------------------------------
+# Open-Meteo provides the latest continuously updated weather-model conditions
+# without an API key. Static terrain/history remain local because those variables
+# do not change minute-to-minute. A short cache avoids hammering the public API.
+LIVE_WEATHER_CACHE = {}
+LIVE_REGIONAL_CACHE = {"ts": 0, "data": None}
+LIVE_TTL_SECONDS = WEATHER_CACHE_TTL_SECONDS
+
+def _cache_key_weather(location_id:int) -> str:
+    return f"open-meteo:{location_id}"
+
+def _persist_source_cache(cache_key:str, provider:str, payload:dict, valid_at=None):
+    try:
+        con=db(); con.execute("INSERT INTO source_cache(cache_key,provider,payload_json,fetched_at,valid_at) VALUES(?,?,?,?,?) ON CONFLICT(cache_key) DO UPDATE SET provider=excluded.provider,payload_json=excluded.payload_json,fetched_at=excluded.fetched_at,valid_at=excluded.valid_at",
+            (cache_key,provider,json.dumps(payload),int(time.time()),valid_at)); con.commit(); con.close()
+    except Exception:
+        pass
+
+def _load_source_cache(cache_key:str):
+    try:
+        con=db(); row=con.execute("SELECT * FROM source_cache WHERE cache_key=?",(cache_key,)).fetchone(); con.close()
+        if not row: return None
+        out=dict(row); out['payload']=json.loads(out.pop('payload_json')); return out
+    except Exception:
+        return None
+
+def _sum_indices(values, indices):
+    total = 0.0
+    for i in indices:
+        try:
+            v = values[i]
+            if v is not None:
+                total += float(v)
+        except Exception:
+            pass
+    return round(total, 1)
+
+def _complete_rain_window(values, indices, count, times=None):
+    """Missing/invalid provider hours must never become zero rainfall."""
+    from flood_risk import number
+    if len(indices) != count:
+        return None
+    if times is not None:
+        try:
+            stamps = [datetime.fromisoformat(times[i]) for i in indices]
+            if any((b-a).total_seconds() != 3600 for a,b in zip(stamps, stamps[1:])):
+                return None
+        except (ValueError, IndexError, TypeError):
+            return None
+    samples = [number(values[i]) if i < len(values) else None for i in indices]
+    return round(sum(samples), 2) if all(v is not None for v in samples) else None
+
+
+def _fetch_json_with_retries(url:str, timeout:float, attempts:int=3):
+    """Small retry wrapper for public weather APIs.
+
+    Render free instances can have transient DNS/connectivity delays after a cold
+    start. Retry only transport/HTTP failures; never replace missing live data
+    with invented observations.
+    """
+    last_error=None
+    for attempt in range(max(1, attempts)):
+        try:
+            req=UrlRequest(url, headers={'User-Agent':'PRAHARI/11.0'})
+            with urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode('utf-8'))
+        except HTTPError as exc:
+            last_error=exc
+            if attempt < attempts-1:
+                retry_after=exc.headers.get('Retry-After') if getattr(exc,'headers',None) else None
+                try: delay=float(retry_after) if retry_after else 2.5*(attempt+1)
+                except Exception: delay=2.5*(attempt+1)
+                time.sleep(min(max(delay,1.0),10.0))
+        except (URLError, TimeoutError, ValueError) as exc:
+            last_error=exc
+            if attempt < attempts-1:
+                time.sleep(0.8 * (attempt+1))
+    raise last_error or RuntimeError('Weather provider request failed')
+
+def fetch_live_weather(x, force=False, data_override=None):
+    now = int(time.time())
+    cached = LIVE_WEATHER_CACHE.get(x['id'])
+    if data_override is None and cached and not force and now - cached['cached_at'] < LIVE_TTL_SECONDS:
+        return cached['packet']
+
+    # Keep the request compact and Render-friendly. We need 11 days of
+    # antecedent rainfall for the research features, so 264 past hours are
+    # sufficient. forecast_hours gives the exact +72 h horizon; forecast_days
+    # is intentionally not combined with it.
+    params = {
+        'latitude': x['lat'],
+        'longitude': x['lon'],
+        'timezone': 'auto',
+        'current': ','.join([
+            'temperature_2m','relative_humidity_2m','precipitation','rain','cloud_cover',
+            'wind_speed_10m','wind_gusts_10m'
+        ]),
+        'hourly': ','.join([
+            'precipitation','rain','precipitation_probability','temperature_2m',
+            'relative_humidity_2m','soil_moisture_0_to_1cm'
+        ]),
+        'past_hours': 264,
+        'forecast_hours': 72
+    }
+    url = 'https://api.open-meteo.com/v1/forecast?' + urlencode(params)
+    try:
+        data = data_override if data_override is not None else _fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=3)
+        current = data.get('current') or {}
+        hourly = data.get('hourly') or {}
+        times = hourly.get('time') or []
+        cur_iso = current.get('time')
+        cur_dt = datetime.fromisoformat(cur_iso) if cur_iso else datetime.now()
+        past_idx, future_idx = [], []
+        for i,t in enumerate(times):
+            try:
+                dt = datetime.fromisoformat(t)
+                (past_idx if dt <= cur_dt else future_idx).append(i)
+            except Exception:
+                pass
+        # The first forecast hour and latest history hour must abut current time.
+        if future_idx and (datetime.fromisoformat(times[future_idx[0]]) - cur_dt).total_seconds() > 3600:
+            future_idx = []
+        if past_idx and (cur_dt - datetime.fromisoformat(times[past_idx[-1]])).total_seconds() >= 3600:
+            past_idx = []
+        past_idx_all = list(past_idx)
+        past_idx_6h = past_idx_all[-6:]
+        past_idx_24h = past_idx_all[-24:]
+        past_idx_72h = past_idx_all[-72:]
+        future_idx = future_idx[:72]
+        precip = hourly.get('precipitation') or []
+        rain = hourly.get('rain') or []
+        probs = hourly.get('precipitation_probability') or []
+        temps = hourly.get('temperature_2m') or []
+        hums = hourly.get('relative_humidity_2m') or []
+        # Soil moisture is an hourly model field. Read the latest available
+        # hourly value instead of requesting it in the current block, which
+        # keeps compatibility across Open-Meteo model combinations.
+        soil = None
+        soil_series = hourly.get('soil_moisture_0_to_1cm') or []
+        if past_idx_all:
+            try: soil = soil_series[past_idx_all[-1]]
+            except Exception: soil = None
+        # Convert volumetric water content to a 0-100 wetness proxy for the operational wetness indicator. This is not a direct field-probe saturation percentage.
+        soil_proxy = round(clamp(float(soil) / 0.5) * 100, 1) if soil is not None else None
+
+        def hval(arr, idx, default=None):
+            try:
+                v = arr[idx]
+                return default if v is None else v
+            except Exception:
+                return default
+        points=[]
+        for offset,label in [(0,'+1h'),(2,'+3h'),(5,'+6h'),(11,'+12h'),(23,'+24h')]:
+            if future_idx:
+                idx=future_idx[min(offset,len(future_idx)-1)]
+                points.append({
+                    'label':label,
+                    'time':hval(times,idx,''),
+                    'rain_mm':round(float(hval(precip,idx,0) or 0),1),
+                    'rain_probability':round(float(hval(probs,idx,0) or 0),0),
+                    'humidity':round(float(hval(hums,idx,current.get('relative_humidity_2m',0)) or 0),0),
+                    'temp_c':round(float(hval(temps,idx,current.get('temperature_2m',0)) or 0),1)
+                })
+        # Research-inspired dynamic rainfall features. Daily effective rainfall uses
+        # an exponentially decaying antecedent-memory term (K=0.84) as a
+        # screening feature; it is not an official local rainfall threshold.
+        daily_sums = {}
+        for i in past_idx_all:
+            try:
+                day = datetime.fromisoformat(times[i]).date().isoformat()
+                daily_sums[day] = daily_sums.get(day, 0.0) + float(hval(precip, i, 0) or 0)
+            except Exception:
+                pass
+        recent_days = sorted(daily_sums.keys(), reverse=True)[:11]
+        rain_7d_days = sorted(daily_sums.keys(), reverse=True)[:7]
+        cumulative_rainfall_7d = round(sum(daily_sums[d] for d in rain_7d_days), 1)
+        effective_rainfall_11d = 0.0
+        for lag, day in enumerate(recent_days):
+            effective_rainfall_11d += (0.84 ** lag) * daily_sums[day]
+        effective_rainfall_11d = round(effective_rainfall_11d, 1)
+        max_hourly_rain_24h = round(max([float(hval(precip,i,0) or 0) for i in past_idx_24h] or [0]), 1)
+
+        packet={
+            'availability':'CURRENT',
+            'live': True,
+            'location_id': x['id'],
+            'location': f"{x['name']}, {x['state']}",
+            'source': 'Open-Meteo latest weather-model feed',
+            'source_url': 'https://open-meteo.com/',
+            'updated_at': int(time.time()),
+            'valid_time': cur_iso,
+            'valid_at_epoch': (int(cur_dt.timestamp()) if cur_dt.tzinfo else int(cur_dt.replace(tzinfo=timezone.utc).timestamp()) - int(data.get('utc_offset_seconds',0))) if cur_iso else None,
+            'latitude': data.get('latitude',x['lat']),
+            'longitude': data.get('longitude',x['lon']),
+            'elevation_model_m': data.get('elevation'),
+            'temperature_c': current.get('temperature_2m'),
+            'humidity': current.get('relative_humidity_2m'),
+            'precipitation_now_mm': current.get('precipitation'),
+            'rain_now_mm': current.get('rain'),
+            'cloud_cover_pct': current.get('cloud_cover'),
+            'wind_kmh': current.get('wind_speed_10m'),
+            'wind_gust_kmh': current.get('wind_gusts_10m'),
+            'soil_moisture_m3m3': soil,
+            'soil_moisture_proxy_pct': soil_proxy,
+            'rainfall_6h_mm': _sum_indices(precip,past_idx_6h),
+            'rainfall_24h_mm': _sum_indices(precip,past_idx_24h),
+            'antecedent_rainfall_72h_mm': _complete_rain_window(precip,past_idx_72h,72,times),
+            'cumulative_rainfall_7d_mm': cumulative_rainfall_7d,
+            'effective_rainfall_11d_mm': effective_rainfall_11d,
+            'max_hourly_rain_24h_mm': max_hourly_rain_24h,
+            'rain_forecast_1h_mm': _complete_rain_window(precip,future_idx[:1],1,times),
+            'rain_forecast_3h_mm': _complete_rain_window(precip,future_idx[:3],3,times),
+            'rain_forecast_6h_mm': _complete_rain_window(precip,future_idx[:6],6,times),
+            'rain_forecast_24h_mm': _sum_indices(precip,future_idx[:24]),
+            'rain_forecast_48h_mm': _sum_indices(precip,future_idx[:48]),
+            'rain_forecast_72h_mm': _sum_indices(precip,future_idx[:72]),
+            'max_rain_probability_24h': max([float(hval(probs,i,0) or 0) for i in future_idx[:24]] or [0]),
+            'forecast': points,
+            'note': 'Current conditions are model-derived. Soil moisture is converted to a wetness proxy.'
+        }
+        if data_override is None:
+            LIVE_WEATHER_CACHE[x['id']]={'cached_at':now,'packet':packet}
+            _persist_source_cache(_cache_key_weather(x['id']), 'Open-Meteo', packet, cur_iso)
+        else:
+            # Render's shared egress can be throttled by the free provider. In that
+            # case the authenticated web client may fetch the same CORS-enabled
+            # Open-Meteo response directly and relay the raw provider JSON here for
+            # parsing. Never write browser-relayed payloads into the trusted server
+            # source cache.
+            packet['source']='Open-Meteo direct browser feed'
+            packet['transport']='BROWSER_DIRECT_RELAY'
+            packet['note']='Current Open-Meteo data fetched directly by the authenticated browser because server egress was rate-limited. Provider payload was parsed server-side but not independently re-fetched.'
+        return packet
+    except Exception as e:
+        # Never invent live observations. Prefer a timestamp-preserving cached public packet;
+        # otherwise return explicit MISSING state and let the assessment become incomplete.
+        candidates=[]
+        if cached and cached.get('packet'):
+            candidates.append({'packet':cached['packet'],'fetched_at':cached.get('cached_at',0)})
+        persisted=_load_source_cache(_cache_key_weather(x['id']))
+        if persisted:
+            candidates.append({'packet':persisted['payload'],'fetched_at':persisted.get('fetched_at',0)})
+        candidates.sort(key=lambda z:z.get('fetched_at',0), reverse=True)
+        if candidates:
+            age=max(0, now-int(candidates[0].get('fetched_at') or 0))
+            if age <= WEATHER_STALE_MAX_SECONDS:
+                stale=dict(candidates[0]['packet']); stale['availability']='STALE'; stale['live']=False; stale['stale_public']=True
+                stale['source']='Open-Meteo cached last-known packet'; stale['cache_age_seconds']=age; stale['error']=str(e)
+                stale['note']='Refresh failed; using a real previously fetched public packet. Timestamp and stale state are preserved.'
+                return stale
+        return {
+            'availability':'MISSING','live':False,'stale_public':False,'location_id':x['id'],'location':f"{x['name']}, {x['state']}",
+            'source':'Open-Meteo unavailable','source_url':'https://open-meteo.com/','updated_at':None,'valid_time':None,'error':str(e),
+            'temperature_c':None,'humidity':None,'precipitation_now_mm':None,'rain_now_mm':None,'cloud_cover_pct':None,'wind_kmh':None,'wind_gust_kmh':None,
+            'soil_moisture_m3m3':None,'soil_moisture_proxy_pct':None,'rainfall_6h_mm':None,'rainfall_24h_mm':None,
+            'antecedent_rainfall_72h_mm':None,'cumulative_rainfall_7d_mm':None,'effective_rainfall_11d_mm':None,'max_hourly_rain_24h_mm':None,
+            'rain_forecast_6h_mm':None,'rain_forecast_24h_mm':None,'rain_forecast_48h_mm':None,'rain_forecast_72h_mm':None,'max_rain_probability_24h':None,
+            'forecast':[],'note':'Live source unavailable and no sufficiently fresh cached observation exists. No values were fabricated.'
+        }
+
+def enrich_with_live(x, packet):
+    d=dict(x)
+    availability=packet.get('availability') or ('CURRENT' if packet.get('live') else 'STALE' if packet.get('stale_public') else 'MISSING')
+    d['data_state']=availability
+    d['live_weather']=availability=='CURRENT'
+    d['weather_source']=packet.get('source')
+    d['weather_updated_at']=packet.get('updated_at')
+    d['weather_valid_time']=packet.get('valid_time')
+    d['weather_error']=packet.get('error')
+    d['weather_note']=packet.get('note')
+    d['weather_transport']=packet.get('transport') or 'SERVER'
+    d['temperature_c']=packet.get('temperature_c')
+    d['humidity']=packet.get('humidity')
+    d['rainfall']=packet.get('rainfall_24h_mm')
+    d['rainfall_6h_mm']=packet.get('rainfall_6h_mm')
+    d['soil_moisture']=packet.get('soil_moisture_proxy_pct')
+    d['antecedent_rainfall_72h']=packet.get('antecedent_rainfall_72h_mm')
+    d['cumulative_rainfall_7d']=packet.get('cumulative_rainfall_7d_mm')
+    d['effective_rainfall_11d']=packet.get('effective_rainfall_11d_mm')
+    d['max_hourly_rain_24h']=packet.get('max_hourly_rain_24h_mm')
+    d['rain_forecast_6h_mm']=packet.get('rain_forecast_6h_mm')
+    d['rain_forecast_24h_mm']=packet.get('rain_forecast_24h_mm')
+    d['rain_forecast_48h_mm']=packet.get('rain_forecast_48h_mm')
+    d['rain_forecast_72h_mm']=packet.get('rain_forecast_72h_mm')
+    d['rain_probability_24h']=packet.get('max_rain_probability_24h')
+    d['soil_moisture_m3m3']=packet.get('soil_moisture_m3m3')
+    d['month']=datetime.now().month
+
+    try:
+        tele=latest_telemetry(x['id']) if 'latest_telemetry' in globals() else None
+    except Exception:
+        tele=None
+    fresh_tele=bool(tele and int(time.time())-int(tele.get('created_at') or 0) <= 1800)
+    d['telemetry']=tele; d['telemetry_fresh']=fresh_tele
+    if fresh_tele and tele.get('source')=='REAL_SENSOR':
+        if tele.get('soil_moisture') is not None: d['soil_moisture']=float(tele['soil_moisture'])
+        for k in ('rainfall_intensity','tilt_deg','vibration_g','pore_pressure_kpa','displacement_mm','quality'):
+            if tele.get(k) is not None: d['telemetry_'+k]=tele.get(k)
+
+    vals={
+        'rainfall_24h':d.get('rainfall'),'antecedent_rainfall_72h':d.get('antecedent_rainfall_72h'),
+        'cumulative_rainfall_7d':d.get('cumulative_rainfall_7d'),'soil_moisture':d.get('soil_moisture'),
+        'slope':d.get('slope'),'max_hourly_rain_24h':d.get('max_hourly_rain_24h'),
+        'rain_forecast_24h':d.get('rain_forecast_24h_mm'),'month':d.get('month'),
+    }
+    if fresh_tele and tele.get('source')=='REAL_SENSOR':
+        vals.update({
+            'rainfall_intensity':tele.get('rainfall_intensity'),'tilt_deg':tele.get('tilt_deg'),
+            'vibration_g':tele.get('vibration_g'),'pore_pressure_kpa':tele.get('pore_pressure_kpa'),
+            'displacement_mm':tele.get('displacement_mm'),'telemetry_quality':tele.get('quality'),
+        })
+    baseline=baseline_assess(vals, tele.get('source') if fresh_tele and tele else None)
+    d['assessment_status']=baseline.status
+    d['assessment_kind']='TRANSPARENT_SCREENING_BASELINE'
+    d['assessment_version']=BASELINE_VERSION
+    d['risk_probability']=None
+    d['risk_percent']=baseline.index
+    d['risk_level']=baseline.level
+    d['factors']=baseline.reasons
+    d['assessment_limitations']=baseline.limitations
+    d['missing_inputs']=baseline.missing
+    required_count=4; available_count=required_count-len(baseline.missing)
+    d['data_completeness_pct']=round(100*available_count/required_count,1)
+    d['trend']='UNKNOWN' if baseline.status!='ASSESSED' else ('RISING' if (d.get('rain_forecast_24h_mm') or 0)>=60 else 'WATCH' if baseline.level in ('HIGH','CRITICAL') else 'STABLE')
+
+
+    d['experimental_model']=None
+
+    d['sources']=[
+        {
+            'id':'open_meteo','name':DATA_CATALOG['open_meteo']['name'],'state':availability,
+            'timestamp':packet.get('valid_time') or packet.get('updated_at'),'units':{'rainfall':'mm','soil_moisture':'m3/m3 + derived wetness proxy'},
+            'coverage':DATA_CATALOG['open_meteo']['coverage'],'spatial_resolution':DATA_CATALOG['open_meteo']['spatial_resolution'],
+            'freshness':DATA_CATALOG['open_meteo']['freshness'],'origin':DATA_CATALOG['open_meteo']['origin'],
+            'note':packet.get('note')
+        },
+    ]
+    if tele:
+        d['sources'].append({'id':'field_telemetry','name':'Field sensor telemetry','state':('CURRENT' if fresh_tele else 'STALE') if tele.get('source')=='REAL_SENSOR' else tele.get('source'),
+            'timestamp':tele.get('created_at'),'units':'sensor-specific','coverage':tele.get('station_id'),'spatial_resolution':'point sensor',
+            'freshness':'<=30 min considered fresh','origin':tele.get('source'),'note':'Only REAL_SENSOR telemetry influences live precursor escalation.'})
+    return d
+
+def locs():
+    return [enrich_with_live(x, _missing_or_cached_packet(x, 'Live data not loaded')) for x in LOCATIONS]
+
+def _missing_or_cached_packet(x, error_message:str):
+    """Return a real cached packet when fresh enough, otherwise explicit MISSING."""
+    now=int(time.time())
+    candidates=[]
+    mem=LIVE_WEATHER_CACHE.get(x['id'])
+    if mem and mem.get('packet'):
+        candidates.append({'packet':mem['packet'],'fetched_at':mem.get('cached_at',0)})
+    persisted=_load_source_cache(_cache_key_weather(x['id']))
+    if persisted:
+        candidates.append({'packet':persisted['payload'],'fetched_at':persisted.get('fetched_at',0)})
+    candidates.sort(key=lambda z:z.get('fetched_at',0), reverse=True)
+    if candidates:
+        age=max(0, now-int(candidates[0].get('fetched_at') or 0))
+        if age <= WEATHER_STALE_MAX_SECONDS:
+            stale=dict(candidates[0]['packet'])
+            stale.update({
+                'availability':'STALE','live':False,'stale_public':True,
+                'source':'Open-Meteo cached last-known packet',
+                'cache_age_seconds':age,'error':error_message,
+                'note':'Live refresh failed; using a real previously fetched Open-Meteo packet with preserved timestamp.'
+            })
+            return stale
+    return {
+        'availability':'MISSING','live':False,'stale_public':False,'location_id':x['id'],
+        'location':f"{x['name']}, {x['state']}",'source':'Open-Meteo unavailable',
+        'source_url':'https://open-meteo.com/','updated_at':None,'valid_time':None,
+        'error':error_message,'temperature_c':None,'humidity':None,'precipitation_now_mm':None,
+        'rain_now_mm':None,'cloud_cover_pct':None,'wind_kmh':None,'wind_gust_kmh':None,
+        'soil_moisture_m3m3':None,'soil_moisture_proxy_pct':None,'rainfall_6h_mm':None,
+        'rainfall_24h_mm':None,'antecedent_rainfall_72h_mm':None,'cumulative_rainfall_7d_mm':None,
+        'effective_rainfall_11d_mm':None,'max_hourly_rain_24h_mm':None,'rain_forecast_6h_mm':None,
+        'rain_forecast_24h_mm':None,'rain_forecast_48h_mm':None,'rain_forecast_72h_mm':None,
+        'max_rain_probability_24h':None,'forecast':[],
+        'note':'Live source unavailable and no sufficiently fresh cached observation exists. No values were fabricated.'
+    }
+
 def live_locs(force=False, mode='live'):
     now=int(time.time())
     if LIVE_REGIONAL_CACHE['data'] is not None and not force and now-LIVE_REGIONAL_CACHE['ts'] < LIVE_TTL_SECONDS:
