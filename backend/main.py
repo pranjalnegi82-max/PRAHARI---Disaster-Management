@@ -631,47 +631,59 @@ def _missing_or_cached_packet(x, error_message:str):
 
 def live_locs(force=False, mode='live'):
     if mode == 'replay':
+        if not _test_fixtures_enabled():
+            raise HTTPException(404,'Replay fixtures are disabled')
         return [enrich_with_live(x, build_replay_packet(x)) for x in LOCATIONS]
     now=int(time.time())
     if LIVE_REGIONAL_CACHE['data'] is not None and not force and now-LIVE_REGIONAL_CACHE['ts'] < LIVE_TTL_SECONDS:
         return LIVE_REGIONAL_CACHE['data']
 
-    # Open-Meteo explicitly supports comma-separated coordinates. Fetch all
-    # monitored locations in one request so cloud hosting does not burst eight
-    # separate calls from the same shared outbound IP.
-    params = {
-        'latitude': ','.join(str(x['lat']) for x in LOCATIONS),
-        'longitude': ','.join(str(x['lon']) for x in LOCATIONS),
-        'timezone': 'auto',
-        'current': ','.join([
-            'temperature_2m','relative_humidity_2m','precipitation','rain','cloud_cover',
-            'wind_speed_10m','wind_gusts_10m'
-        ]),
-        'hourly': ','.join([
-            'precipitation','rain','precipitation_probability','temperature_2m',
-            'relative_humidity_2m','soil_moisture_0_to_1cm'
-        ]),
-        'past_hours': 264,
-        'forecast_hours': 72
-    }
-    url='https://api.open-meteo.com/v1/forecast?'+urlencode(params)
     packets={}
-    try:
-        batch=_fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=2)
-        if not isinstance(batch,list) or len(batch)!=len(LOCATIONS):
-            raise ValueError(f'Unexpected Open-Meteo batch response shape: {type(batch).__name__}')
-        for x,item in zip(LOCATIONS,batch):
-            packets[x['id']]=fetch_live_weather(x, force=True, data_override=item)
-    except Exception as exc:
-        err=f'{type(exc).__name__}: {exc}'
-        for x in LOCATIONS:
-            packets[x['id']]=_missing_or_cached_packet(x, err)
+    # Keep requests small as monitoring expands beyond a single region. A provider
+    # failure now degrades only that chunk instead of blanking every monitored area.
+    chunk_size=10
+    for start in range(0,len(LOCATIONS),chunk_size):
+        group=LOCATIONS[start:start+chunk_size]
+        params = {
+            'latitude': ','.join(str(x['lat']) for x in group),
+            'longitude': ','.join(str(x['lon']) for x in group),
+            'timezone': 'auto',
+            'current': ','.join([
+                'temperature_2m','relative_humidity_2m','precipitation','rain','cloud_cover',
+                'wind_speed_10m','wind_gusts_10m'
+            ]),
+            'hourly': ','.join([
+                'precipitation','rain','precipitation_probability','temperature_2m',
+                'relative_humidity_2m','soil_moisture_0_to_1cm'
+            ]),
+            'past_hours': 264,
+            'forecast_hours': 72
+        }
+        url='https://api.open-meteo.com/v1/forecast?'+urlencode(params)
+        try:
+            batch=_fetch_json_with_retries(url, WEATHER_TIMEOUT_SECONDS, attempts=2)
+            if len(group)==1 and isinstance(batch,dict):
+                batch=[batch]
+            if not isinstance(batch,list) or len(batch)!=len(group):
+                raise ValueError(f'Unexpected Open-Meteo batch response shape: {type(batch).__name__}')
+            for x,item in zip(group,batch):
+                packets[x['id']]=fetch_live_weather(x, force=True, data_override=item)
+        except Exception as exc:
+            err=f'{type(exc).__name__}: {exc}'
+            for x in group:
+                packets[x['id']]=_missing_or_cached_packet(x, err)
+
+    # Elevation is static and cached; parallel first-load calls keep the dashboard
+    # responsive without substituting local constants when the source is absent.
+    uncached=[x for x in LOCATIONS if x['id'] not in TERRAIN_CACHE]
+    if uncached:
+        with ThreadPoolExecutor(max_workers=min(6,len(uncached))) as pool:
+            list(pool.map(fetch_terrain_profile,uncached))
 
     data=[enrich_with_live(x,packets[x['id']]) for x in LOCATIONS]
     LIVE_REGIONAL_CACHE['ts']=now
     LIVE_REGIONAL_CACHE['data']=data
     return data
-
 
 class PortalLoginRequest(BaseModel):
     portal: Literal['ADMIN','FIELD_OFFICER']
