@@ -984,7 +984,7 @@ def _recipient_public(row):
 
 def _alert_broadcast_text(alert:dict, language:str='en', sms:bool=False) -> str:
     location=alert.get('location') or 'the selected area'; level=alert.get('level') or 'HIGH'
-    if alert.get('advisory_type')=='MANUAL':
+    if alert.get('advisory_type') in ('MANUAL','FLASH_FLOOD'):
         # Preserve the reviewed message, including its language and complete instructions.
         return f"PRAHARI | {location}\n{alert.get('message_en') or ''}"
     if language=='hi':
