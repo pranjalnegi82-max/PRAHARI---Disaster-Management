@@ -62,3 +62,18 @@ def test_record_preserves_recovered_terrain_without_drafting(client,monkeypatch)
     assert result['assessment']['terrain_transport']=='BROWSER_RELAY'
     assert result['draft_advisory'] is None
     assert client.post('/api/assessments/1',json={'terrain_elevations':[None]*5}).status_code==422
+
+
+def test_forecast_missing_slope_is_incomplete_not_server_error(client,monkeypatch):
+    from test_v9 import live_packet
+    packet=live_packet();packet.pop('terrain_slope_deg')
+    monkeypatch.setattr(main,'fetch_live_weather',lambda *a,**k:packet)
+    monkeypatch.setattr(main,'terrain_context_map',lambda **kwargs:{})
+    response=client.get('/api/forecast-risk/1')
+    assert response.status_code==200
+    assert response.json()['available'] is False
+    assert response.json()['missing']==['slope']
+    monkeypatch.setattr(main,'terrain_context_map',lambda **kwargs:{1:{'slope_deg':32}})
+    response=client.get('/api/forecast-risk/1')
+    assert response.status_code==200 and response.json()['available'] is True
+    assert all(p['assessment_status']=='ASSESSED' for p in response.json()['points'])
