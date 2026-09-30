@@ -2161,12 +2161,18 @@ def forecast_risk(location_id:int):
     if any(v is None for v in [rain24,rain72,soil]):
         return {'location_id':location_id,'available':False,'state':'INCOMPLETE','points':[],
                 'note':'Required weather fields are missing.'}
+    slope=w.get('terrain_slope_deg')
+    if slope is None:
+        slope=terrain_context_map(allow_fetch=False).get(location_id,{}).get('slope_deg')
+    if slope is None:
+        return {'location_id':location_id,'available':False,'state':'INCOMPLETE','points':[],
+                'missing':['slope'],'note':'Terrain gradient unavailable.'}
     f6=w.get('rain_forecast_6h_mm') or 0; f24=w.get('rain_forecast_24h_mm') or 0; f48=w.get('rain_forecast_48h_mm') or f24; f72=w.get('rain_forecast_72h_mm') or f48
     scenarios=[('NOW',rain24,0),('+6H',max(0,rain24*.78+f6),f6),('+24H',max(0,rain24*.28+f24),f24),('+48H',max(0,rain24*.12+max(0,f48-f24)),f48),('+72H',max(0,max(0,f72-f48)),f72)]
     points=[]
     for label,rain,added in scenarios:
         res=baseline_assess({'rainfall_24h':rain,'antecedent_rainfall_72h':rain72+added*.55,'cumulative_rainfall_7d':(w.get('cumulative_rainfall_7d_mm') or rain72*1.7)+added*.7,
-                            'soil_moisture':min(100,soil+added*.08),'slope':base['slope'],'max_hourly_rain_24h':w.get('max_hourly_rain_24h_mm')})
+                            'soil_moisture':min(100,soil+added*.08),'slope':slope,'max_hourly_rain_24h':w.get('max_hourly_rain_24h_mm')})
         points.append({'horizon':label,'risk_index':res.index,'risk_level':res.level,'assessment_status':res.status,'rainfall_24h_mm':round(rain,1),'forecast_added_mm':round(added,1)})
     return {'location_id':location_id,'location':f"{base['name']}, {base['state']}",'available':True,'state':w.get('availability'),
             'source':w.get('source'),'points':points,'assessment_kind':'TRANSPARENT_SCREENING_TRAJECTORY',
