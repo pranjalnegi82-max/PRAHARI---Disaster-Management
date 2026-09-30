@@ -1637,6 +1637,25 @@ def summary():
     }
 
 
+@app.get('/api/public/advisories')
+def public_advisories(language:str='en'):
+    # Only published advisory fields belong in the civilian portal.
+    con=db()
+    try:
+        rows=con.execute("SELECT id,location_id,location,level,message_en,message_hi,message_as,recommended_action,created_at,issued_at,lifecycle_status FROM alerts WHERE lifecycle_status IN ('ISSUED','ACKNOWLEDGED') ORDER BY created_at DESC,id DESC LIMIT 100").fetchall()
+    finally:
+        con.close()
+    result=[]
+    message_key=f'message_{language}' if language in ('en','hi','as') else 'message_en'
+    for row in rows:
+        data=dict(row)
+        data['message']=data.get(message_key) or data.get('message_en')
+        for key in ('message_en','message_hi','message_as'):
+            data.pop(key,None)
+        result.append(data)
+    return result
+
+
 @app.get("/api/alerts")
 def alerts(language:str="en", limit:int=50, lifecycle_status:Optional[str]=None):
     con=db(); sql="SELECT * FROM alerts"; params=[]

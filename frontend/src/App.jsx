@@ -321,14 +321,54 @@ function FieldAlertsReadOnly({alerts,posting}){
   return <div><div className="page-title"><div><h1>Issued Alerts</h1><p>Read-only advisories for {posting||'your assigned posting'}.</p></div></div><Panel title="Current advisories" subtitle="Field officers cannot issue or modify command-center alerts."><div className="card-list">{alerts.length?alerts.map(a=><article className="record-card alert-card" key={a.id}><div className="record-top"><RiskBadge level={a.level}/><Badge tone={a.lifecycle_status==='ISSUED'?'danger':'neutral'}>{a.lifecycle_status}</Badge></div><h3>{a.location}</h3><p>{a.message}</p><div className="record-meta">Issued {fmtTime(a.issued_at||a.created_at)} · Alert #{a.id}</div></article>):<Empty title="No active issued alerts" detail="Command-center advisories for this posting will appear here after issuance."/>}</div></Panel></div>;
 }
 
+function PublicPortal(){
+  const [view,setView]=useState('Flash Floods');
+  const [locations,setLocations]=useState([]),[selectedId,setSelectedId]=useState(null);
+  const [alerts,setAlerts]=useState(null),[error,setError]=useState(''),[loading,setLoading]=useState(true);
+  const selected=locations.find(x=>x.id===selectedId)||locations[0];
+  async function loadAlerts(){
+    try {setAlerts(await get('/api/public/advisories'));} catch {setAlerts(null);}
+  }
+  useEffect(()=>{let active=true;
+    get('/api/live/locations?mode=live').then(data=>{if(active)setLocations(data);})
+      .catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setLoading(false);});
+    loadAlerts();return()=>{active=false;};
+  },[]);
+  const navigation=['Flash Floods','Overview','Risk Map','Alerts'];
+  const areaAlerts=(alerts||[]).filter(a=>a.location_id===selected?.id);
+  return <div className="app-shell">
+    <aside className="sidebar"><button className="sidebar-brand" onClick={()=>setView('Overview')}><span className="brand-symbol">P</span><span><strong>PRAHARI</strong><small>Predict · Prepare · Protect</small></span></button>
+      <nav className="side-nav" aria-label="Main navigation">{navigation.map(item=><button key={item} aria-label={item} className={view===item?'active':''} onClick={()=>setView(item)}><Icon name={item==='Alerts'?'bell':NAV_ICONS[item]} size={18}/><span>{item}</span></button>)}</nav>
+      <div className="sidebar-spacer"/><p className="sidebar-note">Hilly-region monitoring</p>
+    </aside>
+    <div className="app-frame"><header className="topbar"><LocationSelector locations={locations} selectedId={selected?.id} onSelect={setSelectedId} compact/>
+      <div className="top-actions"><span className="portal-identity">Public view</span><a className="btn btn-ghost small" href="#/login">Staff sign in</a></div>
+    </header><main className="workspace">
+      {error&&<ErrorBox message={error} onRetry={()=>window.location.reload()}/>}
+      {loading?<Loading/>:!selected?<Empty title="Monitoring areas unavailable" detail="Please try again shortly."/>:<>
+        {view==='Flash Floods'&&<FlashFloodPanel key={selected.id} selected={selected} readOnly alerts={alerts} onOpenAlerts={()=>setView('Alerts')} onRefreshAlerts={loadAlerts}/>}
+        {view==='Overview'&&<><div className="page-title"><div><h1>Area overview</h1><p>{selected.name} · {selected.state}</p></div><StateBadge state={selected.data_state}/></div>
+          <section className="summary-strip"><StatCard icon="alert" label="Landslide screening" value={selected.risk_level||'UNKNOWN'} detail="Uncalibrated screening" tone="blue"/><StatCard icon="rain" label="Rainfall · 24 h" value={fmt(selected.rainfall)} unit=" mm" detail="Latest available observations" tone="blue"/><StatCard icon="water" label="Soil wetness" value={fmt(selected.soil_moisture)} unit="%" detail="Weather-derived proxy" tone="teal"/><StatCard icon="data" label="Terrain gradient" value={fmt(selected.slope)} unit="°" detail="Available terrain context" tone="green"/></section>
+          <Panel title="Monitoring map"><RiskMapView locations={locations} selected={selected} onSelect={loc=>setSelectedId(loc.id)}/></Panel></>}
+        {view==='Risk Map'&&<RiskMapPage locations={locations} selected={selected} assessment={selected} onSelect={loc=>setSelectedId(loc.id)} readOnly/>}
+        {view==='Alerts'&&<><div className="page-title"><div><h1>Public advisories</h1><p>{selected.name} · {selected.state}</p></div><button className="btn btn-secondary" onClick={loadAlerts}>Refresh</button></div>
+          {alerts===null?<ErrorBox message="Advisories are temporarily unavailable." onRetry={loadAlerts}/>:<Panel title="Issued advisories"><div className="card-list">{areaAlerts.length?areaAlerts.map(a=><article key={a.id} className="record-card alert-card"><RiskBadge level={a.level}/><h3>{a.location}</h3><p>{a.message}</p>{a.recommended_action&&<p>{a.recommended_action}</p>}<small>Issued {fmtTime(a.issued_at||a.created_at)}</small></article>):<Empty title="No active issued advisories" detail="No active PRAHARI advisory is listed for this area."/>}</div></Panel>}</>}
+      </>}
+    </main><footer>Advisory decision support only · Follow official warnings and local authority instructions.</footer></div>
+  </div>;
+}
+
 function PortalApp(){
+  const [route,setRoute]=useState(window.location.hash.toLowerCase());
+  useEffect(()=>{const change=()=>setRoute(window.location.hash.toLowerCase());window.addEventListener('hashchange',change);return()=>window.removeEventListener('hashchange',change);},[]);
+
   const saved=getPortalSession();
   const requestedPortal=window.location.hash.toLowerCase().includes('/field')?'FIELD_OFFICER':'ADMIN';
   const [session,setSession]=useState(()=>saved);
   const [checking,setChecking]=useState(Boolean(saved));
   const [sessionError,setSessionError]=useState('');
   function authenticated(next){window.location.hash=next.portal==='FIELD_OFFICER'?'#/field':'#/admin';setSession(next);}
-  function logout(){clearPortalSession();window.location.hash='#/login';setSession(null);setChecking(false);setSessionError('');}
+  function logout(){clearPortalSession();window.location.hash='#/';setSession(null);setChecking(false);setSessionError('');}
   useEffect(()=>{
     let cancelled=false;
     async function validate(){
@@ -346,7 +386,8 @@ function PortalApp(){
     validate(); return()=>{cancelled=true};
   },[session?.portal]);
   if(checking) return <div className="portal-check"><div className="portal-check-card"><span className="brand-symbol">P</span><Loading/><span>Validating PRAHARI portal session…</span></div></div>;
-  if(!session) return <><PortalLogin initialPortal={requestedPortal} onAuthenticated={authenticated}/>{sessionError&&<div className="sr-only" aria-live="polite">{sessionError}</div>}</>;
+  if(!session&&!['#/login','#/admin','#/field'].includes(route)) return <PublicPortal/>;
+  if(!session) return <><a className="btn btn-secondary" href="#/">Public dashboard</a><PortalLogin initialPortal={requestedPortal} onAuthenticated={authenticated}/>{sessionError&&<div className="sr-only" aria-live="polite">{sessionError}</div>}</>;
   if(session.portal==='FIELD_OFFICER') return <FieldOfficerPortal session={session} onLogout={logout}/>;
   return <AdminPortal session={session} onLogout={logout}/>;
 }
@@ -623,21 +664,21 @@ function SatelliteSceneCard({scene,label}) {
   </article>;
 }
 
-function RiskMapPage({locations,selected,onSelect,onAssess,assessment}) {
+function RiskMapPage({locations,selected,onSelect,onAssess,assessment,readOnly=false}) {
   const [basemap,setBasemap]=useState('street');
   const [history,setHistory]=useState([]);
   const [forecast,setForecast]=useState(null);
   useEffect(()=>{ if (!selected) return; Promise.allSettled([get(`/api/assessments/${selected.id}/history`),get(`/api/forecast-risk/${selected.id}`)]).then(([h,f])=>{if(h.status==='fulfilled')setHistory(h.value);if(f.status==='fulfilled')setForecast(f.value);}); },[selected?.id]);
 
   return <div className="risk-map-page">
-    <div className="map-toolbar"><div><h1>{basemap==='intelligence'?'Sentinel-2 Imagery':'Risk Map'}</h1><p>{basemap==='intelligence'?'Recent Sentinel-2 acquisitions for the selected monitoring area.':'Weather risk, field evidence and satellite context remain explicitly separated.'}</p></div><div className="segmented"><button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button><button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite view</button><button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence')}>Sentinel-2 imagery</button></div></div>
+    <div className="map-toolbar"><div><h1>{basemap==='intelligence'?'Sentinel-2 Imagery':'Risk Map'}</h1><p>{basemap==='intelligence'?'Recent Sentinel-2 acquisitions for the selected monitoring area.':'Weather risk, field evidence and satellite context remain explicitly separated.'}</p></div><div className="segmented"><button className={basemap==='street'?'active':''} onClick={()=>setBasemap('street')}>Street</button><button className={basemap==='satellite'?'active':''} onClick={()=>setBasemap('satellite')}>Satellite view</button>{!readOnly&&<button className={basemap==='intelligence'?'active':''} onClick={()=>setBasemap('intelligence')}>Sentinel-2 imagery</button>}</div></div>
 
     {basemap==='intelligence'
       ? <SatelliteIntelligence key={selected?.id} selected={selected} searchScenes={browserSentinel2Search} SceneCard={SatelliteSceneCard}/>
       : <div className="map-layout">
           <RiskMapView locations={locations} selected={selected} onSelect={onSelect} basemap={basemap}/>
           <aside className="map-detail">
-            <Panel title={selected?`${selected.name}, ${selected.state}`:'Select an area'} actions={selected&&<button className="btn btn-primary" onClick={onAssess}>Record assessment</button>}>
+            <Panel title={selected?`${selected.name}, ${selected.state}`:'Select an area'} actions={!readOnly&&selected&&<button className="btn btn-primary" onClick={onAssess}>Record assessment</button>}>
               {selected && <><div className="detail-risk"><RiskBadge level={assessment?.risk_level || selected.risk_level}/><strong>{assessment?.risk_percent == null ? 'Index unavailable' : `${fmt(assessment.risk_percent,0)} / 100`}</strong></div>
               <StateBadge state={assessment?.data_state || selected.data_state}/>
               <dl className="kv"><dt>24 h rain</dt><dd>{fmt(assessment?.rainfall ?? selected.rainfall)} mm</dd><dt>72 h antecedent rain</dt><dd>{fmt(assessment?.antecedent_rainfall_72h ?? selected.antecedent_rainfall_72h)} mm</dd><dt>Soil wetness</dt><dd>{fmt(assessment?.soil_moisture ?? selected.soil_moisture)}%</dd></dl></>}

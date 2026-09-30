@@ -177,3 +177,22 @@ def test_flood_sms_preserves_hazard_and_reviewed_text():
     for language in ('en','hi','as'):
         text=main._alert_broadcast_text({'advisory_type':'FLASH_FLOOD','location':'Mandi','message_en':message},language,sms=True)
         assert message in text and 'landslide' not in text
+
+
+def test_public_advisories_exclude_drafts_and_private_fields(client):
+    draft=client.post('/api/alerts',json={'location_id':1,'level':'HIGH','message':'QA private draft message'}).json()['alert']
+    issued=client.post('/api/alerts',json={'location_id':1,'level':'HIGH','message':'QA published advisory message'}).json()['alert']
+    con=main.db()
+    con.execute("UPDATE alerts SET lifecycle_status='ISSUED',issued_at=? WHERE id=?",(int(time.time()),issued['id']))
+    con.commit();con.close()
+    main.app.dependency_overrides[resolve_role]=lambda:'PUBLIC'
+    response=client.get('/api/public/advisories')
+    assert response.status_code==200
+    rows=response.json()
+    assert draft['id'] not in [row['id'] for row in rows]
+    published=next(row for row in rows if row['id']==issued['id'])
+    assert published['message']=='QA published advisory message'
+    assert set(published)=={'id','location_id','location','level','recommended_action','created_at','issued_at','lifecycle_status','message'}
+    assert client.get('/api/field/households').status_code==403
+    assert client.post('/api/alerts',json={'location_id':1,'level':'HIGH','message':'QA blocked public write'}).status_code==403
+    assert client.post('/api/flood/assessments/1',json={}).status_code==403
