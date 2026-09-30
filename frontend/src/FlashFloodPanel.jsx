@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {MapContainer, TileLayer, CircleMarker, Popup} from 'react-leaflet';
 import {get, post, downloadUrl} from './api.js';
 
@@ -18,36 +18,50 @@ export default function FlashFloodPanel({selected, readOnly=false, onRefreshAler
   const [busy,setBusy]=useState(false), [error,setError]=useState(''), [notice,setNotice]=useState(''), [recordId,setRecordId]=useState(null);
   const id=selected?.id;
 
+  const generation=useRef(0), active=useRef(null);
+  const [historyError,setHistoryError]=useState('');
+  function begin(clear=false) {
+    active.current?.abort();
+    const controller=new AbortController(); active.current=controller;
+    const seq=++generation.current;
+    setBusy(true);setError('');setNotice('');setHistoryError('');
+    if(clear){setResult(null);setHistory([]);setRecordId(null);}
+    return {options:{timeout:15000,signal:controller.signal},current:()=>seq===generation.current&&!controller.signal.aborted};
+  }
   async function load() {
     if(!id)return;
-    setBusy(true); setError(''); setNotice('');
+    const task=begin(true);
+    get(`/api/flood/history/${id}`,task.options).then(h=>{if(task.current())setHistory(h);})
+      .catch(e=>{if(task.current())setHistoryError(e.message);});
     try {
-      const [r,h]=await Promise.all([get(`/api/flood/screen/${id}`),get(`/api/flood/history/${id}`)]);
-      setResult(validateAssessment(r)); setHistory(h);
-    } catch(e) {
-      setError(e.message);
-    } finally { setBusy(false); }
+      const r=await get(`/api/flood/screen/${id}`,task.options);
+      if(task.current())setResult(validateAssessment(r));
+    } catch(e) {if(task.current())setError(e.message);}
+    finally {if(task.current())setBusy(false);}
   }
-
-  useEffect(()=>{load();},[id]);
+  useEffect(()=>{load();return()=>{generation.current++;active.current?.abort();};},[id]);
 
   async function run(){
-    setBusy(true);setError('');setNotice('');setRecordId(null);
-    try{
-      const out=await post(`/api/flood/assessments/${id}`,{});
+    const task=begin();setRecordId(null);
+    try {
+      const out=await post(`/api/flood/assessments/${id}`,{},task.options);
+      if(!task.current())return;
       setResult(validateAssessment(out.assessment));setRecordId(out.id);
-      setHistory(await get(`/api/flood/history/${id}`));
       setNotice(`Assessment #${out.id} recorded.`);
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+      try {const h=await get(`/api/flood/history/${id}`,task.options);if(task.current())setHistory(h);}
+      catch(e){if(task.current())setHistoryError(e.message);}
+    }catch(e){if(task.current())setError(e.message);}
+    finally{if(task.current())setBusy(false);}
   }
-
   async function draft(){
-    setBusy(true);setError('');
-    try{
-      const out=await post(`/api/flood/records/${recordId}/draft`,{});
+    const task=begin();
+    try {
+      const out=await post(`/api/flood/records/${recordId}/draft`,{},task.options);
+      if(!task.current())return;
       setNotice(`Draft #${out.alert.id} created.`);
       await onRefreshAlerts?.();
-    }catch(e){setError(e.message)}finally{setBusy(false)}
+    }catch(e){if(task.current())setError(e.message);}
+    finally{if(task.current())setBusy(false);}
   }
 
   const verified=result?.basin?.context_status==='CONFIGURED';
@@ -60,7 +74,7 @@ export default function FlashFloodPanel({selected, readOnly=false, onRefreshAler
       {!readOnly&&<button className="btn btn-primary" disabled={busy||!id} onClick={run}>{busy?'Refreshing…':'Run assessment'}</button>}
     </header>
 
-    {error&&<div className="notice notice-error" role="alert">{error}</div>}
+    {error&&<div className="notice notice-error" role="alert"><span>{error}</span><button className="btn btn-secondary" disabled={busy} onClick={load}>Retry</button></div>}
     {notice&&<div className="notice" role="status">{notice}</div>}
     {busy&&!result&&<p role="status">Loading current hydrometeorological data…</p>}
 
@@ -89,8 +103,8 @@ export default function FlashFloodPanel({selected, readOnly=false, onRefreshAler
           <div className="status-grid">
             <div><span>Soil wetness</span><strong>{value(result.soil_wetness_proxy_pct)}%</strong></div>
             <div><span>72 h rainfall</span><strong>{value(result.antecedent_rainfall_72h_mm)} mm</strong></div>
-            <div><span>Terrain gradient</span><strong>{value(result.terrain_slope_deg)}°</strong></div>
-            <div><span>Elevation</span><strong>{value(result.terrain_elevation_m)} m</strong></div>
+            <div><span>Terrain gradient</span><strong>{value(result.terrain_slope_deg??selected?.slope)}°</strong></div>
+            <div><span>Elevation</span><strong>{value(result.terrain_elevation_m??selected?.elevation)} m</strong></div>
           </div>
           {!readOnly&&eligible&&<button className="btn btn-primary" disabled={busy} onClick={draft}>Create alert draft</button>}
         </section>
@@ -102,6 +116,7 @@ export default function FlashFloodPanel({selected, readOnly=false, onRefreshAler
       </section>
 
       <section className="panel"><div className="section-heading"><div><span className="eyebrow">Records</span><h2>Assessment history</h2></div></div>
+        {historyError&&<p role="alert">History unavailable. {historyError}</p>}
         {history.length===0?<p className="muted">No recorded assessments.</p>:<div className="flood-history">{history.map(h=><div key={h.id}><strong>#{h.id} · {h.assessment.level}</strong><span>{date(h.assessment.created_at)} · {h.assessment.data_state}</span><a href={downloadUrl(`/api/flood/records/${h.id}`)} target="_blank" rel="noreferrer">JSON</a></div>)}</div>}
       </section>
     </>}

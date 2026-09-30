@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup, GeoJSON, useMap } from 'react-leaflet';
 import { API, downloadUrl, get, patch, post, postForm, getOperatorKey, setOperatorKey, getPortalSession, setPortalSession, clearPortalSession, loginPortal } from './api.js';
 
@@ -35,7 +35,8 @@ function terrainSampleCoordinates(loc) {
 
 function terrainFromRows(rows) {
   if (!Array.isArray(rows) || rows.length!==5) return null;
-  const e=rows.map(x=>Number(x?.elevation));
+  if(rows.some(x=>x?.elevation==null || x.elevation==='')) return null;
+  const e=rows.map(x=>Number(x.elevation));
   if (e.some(x=>!Number.isFinite(x))) return null;
   const [center,north,south,east,west]=e;
   const dzNS=(north-south)/2000;
@@ -50,16 +51,15 @@ async function browserTerrainContexts(locations) {
   const coords=locations.flatMap(terrainSampleCoordinates);
   const params=new URLSearchParams({
     latitude:coords.map(x=>x[0]).join(','),
-    longitude:coords.map(x=>x[1]).join(','),
-    timezone:'UTC',current:'temperature_2m',forecast_hours:'1'
+    longitude:coords.map(x=>x[1]).join(',')
   });
-  const response=await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+  const response=await fetch(`https://api.open-meteo.com/v1/elevation?${params.toString()}`,{signal:AbortSignal.timeout(10000)});
   if(!response.ok) return {};
   const raw=await response.json();
-  const rows=Array.isArray(raw)?raw:[raw];
+  const rows=Array.isArray(raw.elevation)?raw.elevation.map(elevation=>({elevation})):[];
   if(rows.length!==coords.length) return {};
   const terrain={};
-  locations.forEach((loc,i)=>{const item=terrainFromRows(rows.slice(i*5,i*5+5));if(item)terrain[loc.id]=item;});
+  locations.forEach((loc,i)=>{const item=terrainFromRows(rows.slice(i*5,i*5+5));if(item)terrain[loc.id]={...item,elevations:rows.slice(i*5,i*5+5).map(x=>x.elevation)};});
   return terrain;
 }
 
@@ -75,7 +75,7 @@ async function browserDirectLiveFallback(locations) {
     forecast_hours: '72',
   });
   const [response,terrain] = await Promise.all([
-    fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`),
+    fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`,{signal:AbortSignal.timeout(10000)}),
     browserTerrainContexts(locations).catch(()=>({}))
   ]);
   if (!response.ok) throw new Error(`Direct Open-Meteo fallback failed: ${response.status} ${response.statusText}`);
@@ -91,8 +91,21 @@ async function browserDirectLiveFallback(locations) {
 
 function needsBrowserWeatherFallback(data) {
   return Array.isArray(data) && data.length > 0 &&
-    data.every(x=>x.data_state==='MISSING') &&
-    data.some(x=>String(x.weather_error||'').includes('429'));
+    data.some(x=>x.data_state==='MISSING');
+}
+
+async function recoverMissingTerrain(data) {
+  const missing=data.filter(x=>x.slope==null && x.data_state!=='MISSING');
+  if(!missing.length)return data;
+  try {
+    const terrain=await browserTerrainContexts(missing);
+    const updates=await Promise.all(missing.map(async loc=>{
+      if(!terrain[loc.id])return loc;
+      try {return {...loc,...await post(`/api/terrain/${loc.id}/browser-relay`,{elevations:terrain[loc.id].elevations},{timeout:10000}),__browser_terrain:terrain[loc.id]};}
+      catch {return loc;}
+    }));
+    return data.map(loc=>updates.find(x=>x.id===loc.id)||loc);
+  } catch {return data;}
 }
 
 function Badge({children, tone='neutral'}) { return <span className={`badge badge-${tone}`}>{children}</span>; }
@@ -228,7 +241,10 @@ function FieldOfficerPortal({session,onLogout}) {
   const [error,setError]=useState('');
   const [refreshing,setRefreshing]=useState(false);
 
+  const loadGeneration=useRef(0);
+  useEffect(()=>()=>{loadGeneration.current++;},[]);
   async function loadAll(){
+    const sequence=++loadGeneration.current;
     setError(''); setRefreshing(true);
     try{
       const [a,p,l,r,al,h]=await Promise.all([
@@ -241,7 +257,9 @@ function FieldOfficerPortal({session,onLogout}) {
         try { liveLocations=await browserDirectLiveFallback(liveLocations); }
         catch (fallbackError) { console.warn('PRAHARI browser weather fallback unavailable:', fallbackError); }
       }
-      setAuth(a); setProfile({...p,posting_location_id:p.location_id}); setLocations(liveLocations); setReports(r); setAlerts(al); setHouseholds(h);
+      if(sequence!==loadGeneration.current)return;
+      setAuth(a); setProfile({...p,posting_location_id:p.location_id}); setLocations(liveLocations);
+      recoverMissingTerrain(liveLocations).then(data=>{if(sequence===loadGeneration.current)setLocations(data);}); setReports(r); setAlerts(al); setHouseholds(h);
     }catch(e){setError(e.message);}finally{setLoading(false);setRefreshing(false);}
   }
   useEffect(()=>{loadAll();},[]);
@@ -350,7 +368,10 @@ function AdminPortal({session,onLogout}) {
 
   const selected = useMemo(() => locations.find(x=>x.id===selectedId) || locations[0], [locations, selectedId]);
 
+  const loadGeneration=useRef(0);
+  useEffect(()=>()=>{loadGeneration.current++;},[]);
   async function loadLocations(force=false) {
+    const sequence=++loadGeneration.current;
     setError(''); setRefreshing(true);
     try {
       let data = await get(`/api/live/locations?mode=${mode}&force=${force}`);
@@ -358,7 +379,9 @@ function AdminPortal({session,onLogout}) {
         try { data = await browserDirectLiveFallback(data); }
         catch (fallbackError) { console.warn('PRAHARI browser weather fallback unavailable:', fallbackError); }
       }
+      if(sequence!==loadGeneration.current)return;
       setLocations(data);
+      recoverMissingTerrain(data).then(next=>{if(sequence===loadGeneration.current)setLocations(next);});
       if (!data.some(x=>x.id===selectedId) && data[0]) setSelectedId(data[0].id);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); setRefreshing(false); }
@@ -380,7 +403,7 @@ function AdminPortal({session,onLogout}) {
     try {
       const out = mode==='live' && selected?.__browser_provider_payload
         ? await post(`/api/assessments/${selected.id}/browser-relay`, {provider:'OPEN_METEO', payload:selected.__browser_provider_payload, terrain:selected.__browser_terrain||null})
-        : await post(`/api/assessments/${selected.id}?mode=${mode}&force=true`, {});
+        : await post(`/api/assessments/${selected.id}?mode=${mode}&force=true`, selected.__browser_terrain?.elevations?{terrain_elevations:selected.__browser_terrain.elevations}:{});
       setAssessment(out.assessment); setAssessmentId(out.assessment_id);
       await loadLocations(true); await loadSideData();
     } catch(e) { setError(e.message); }
