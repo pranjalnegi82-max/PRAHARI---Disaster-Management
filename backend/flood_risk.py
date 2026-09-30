@@ -27,9 +27,10 @@ def assess(packet, basin, sensor=None, now=0):
     # Illustrative sensitivity only, not an empirically calibrated hydrologic model.
     multiplier = max(0.6, 1 - 0.25 * (wet or 0) / 100 - 0.15 * min((antecedent or 0) / 300, 1))
     windows = []
+    context_missing=bool(missing)
     for hours in HORIZONS:
         rain = number(packet.get(f'rain_forecast_{hours}h_mm'))
-        threshold = basin['thresholds_mm'][str(hours)] * multiplier if not missing else None
+        threshold = basin['thresholds_mm'][str(hours)] * multiplier if not context_missing else None
         ratio = rain / threshold if rain is not None and threshold else None
         level = ('CRITICAL' if ratio >= 1.5 else 'HIGH' if ratio >= 1 else 'MODERATE' if ratio >= 0.7 else 'LOW') if ratio is not None else 'UNKNOWN'
         windows.append({'hours': hours, 'rainfall_mm': rain, 'screening_threshold_mm': round(threshold, 2) if threshold else None,
@@ -37,6 +38,7 @@ def assess(packet, basin, sensor=None, now=0):
         if rain is None: missing.append(f'rain_forecast_{hours}h_mm')
     sensor_used = bool(sensor and sensor['source'] == 'REAL_SENSOR' and sensor['quality'] >= 0.8
                        and 0 <= now - sensor['observed_at'] <= 900 and state == 'CURRENT'
+                       and valid_at is not None and 0 <= now-valid_at <= 10800
                        and basin.get('station_id') == sensor['station_id'] and basin.get('danger_stage_m') is not None)
     stage_exceeded = sensor_used and sensor['water_level_m'] >= basin['danger_stage_m']
     rank = {'UNKNOWN': -1, 'LOW': 0, 'MODERATE': 1, 'HIGH': 2, 'CRITICAL': 3}
@@ -46,6 +48,7 @@ def assess(packet, basin, sensor=None, now=0):
     return {'hazard': 'FLASH_FLOOD', 'version': VERSION, 'level': level,
             'status': 'INSUFFICIENT_DATA' if missing else 'SCREENED', 'windows': windows, 'missing': missing,
             'data_state': state, 'source': packet.get('source'), 'valid_time': packet.get('valid_time'),
+            'transport': packet.get('transport','SERVER'), 'rainfall_24h_mm':number(packet.get('rainfall_24h_mm')),
             'fetched_at': packet.get('updated_at'), 'valid_at_epoch': valid_at, 'soil_wetness_proxy_pct': wet, 'antecedent_rainfall_72h_mm': antecedent,
             'basin': basin, 'sensor': sensor, 'sensor_used': sensor_used, 'stage_exceeded': bool(stage_exceeded),
             'terrain_slope_deg': number(packet.get('terrain_slope_deg'), hi=90),

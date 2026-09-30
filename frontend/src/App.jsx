@@ -236,6 +236,7 @@ function FieldOfficerPortal({session,onLogout}) {
   const [locations,setLocations]=useState([]);
   const [reports,setReports]=useState([]);
   const [alerts,setAlerts]=useState([]);
+  const [alertsKnown,setAlertsKnown]=useState(false);
   const [households,setHouseholds]=useState([]);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
@@ -259,7 +260,7 @@ function FieldOfficerPortal({session,onLogout}) {
       }
       if(sequence!==loadGeneration.current)return;
       setAuth(a); setProfile({...p,posting_location_id:p.location_id}); setLocations(liveLocations);
-      recoverMissingTerrain(liveLocations).then(data=>{if(sequence===loadGeneration.current)setLocations(data);}); setReports(r); setAlerts(al); setHouseholds(h);
+      recoverMissingTerrain(liveLocations).then(data=>{if(sequence===loadGeneration.current)setLocations(data);}); setReports(r); setAlerts(al);setAlertsKnown(true); setHouseholds(h);
     }catch(e){setError(e.message);}finally{setLoading(false);setRefreshing(false);}
   }
   useEffect(()=>{loadAll();},[]);
@@ -289,7 +290,7 @@ function FieldOfficerPortal({session,onLogout}) {
       </header>
       <main className="workspace">
         {error&&<ErrorBox message={error} onRetry={loadAll}/>} {loading?<Loading/>:<>
-          {view==='Flash Floods'&&<FlashFloodPanel key={selected?.id} selected={selected} readOnly/>}
+          {view==='Flash Floods'&&<FlashFloodPanel key={selected?.id} selected={selected} readOnly alerts={alertsKnown?alerts:null} onRefreshAlerts={loadAll} onOpenAlerts={()=>setView('Alerts')}/>}
           {view==='Overview'&&<FieldOverview selected={selected} profile={profile} activeHouseholds={activeHouseholds} reports={postingReports} alerts={issuedAlerts} onNavigate={setView}/>} 
           {view==='Civilian Registry'&&<div><div className="page-title"><div><h1>Civilian Registry</h1><p>Register opted-in households only for your assigned posting.</p></div><button className="btn btn-secondary" onClick={loadAll}>Refresh registry</button></div><CivilianEnrollmentPane auth={auth||{current_role:'FIELD_OFFICER',actor:profile}} locations={locations} selected={selected}/></div>}
           {view==='Field Reports'&&<div><div className="page-title"><div><h1>Field Reports</h1><p>Submit observations from {profile?.posting||'your posting'}. Report review remains with the command center.</p></div></div><ReportsPane reports={postingReports} selected={selected} onRefresh={loadAll} canManage={false}/></div>}
@@ -360,7 +361,9 @@ function AdminPortal({session,onLogout}) {
   const [refreshing, setRefreshing] = useState(false);
   const [assessment, setAssessment] = useState(null);
   const [assessmentId, setAssessmentId] = useState(null);
+  const [floodRefresh,setFloodRefresh]=useState(0);
   const [alerts, setAlerts] = useState([]);
+  const [alertsKnown,setAlertsKnown]=useState(false);
   const [reports, setReports] = useState([]);
   const [system, setSystem] = useState(null);
   const [sources, setSources] = useState(null);
@@ -381,6 +384,7 @@ function AdminPortal({session,onLogout}) {
       }
       if(sequence!==loadGeneration.current)return;
       setLocations(data);
+      if(force)setFloodRefresh(n=>n+1);
       recoverMissingTerrain(data).then(next=>{if(sequence===loadGeneration.current)setLocations(next);});
       if (!data.some(x=>x.id===selectedId) && data[0]) setSelectedId(data[0].id);
     } catch (e) { setError(e.message); }
@@ -388,7 +392,7 @@ function AdminPortal({session,onLogout}) {
   }
   async function loadSideData() {
     const tasks = await Promise.allSettled([get('/api/alerts'), get('/api/reports'), get('/api/system/status'), get('/api/data/sources'), get('/api/auth/status')]);
-    if (tasks[0].status==='fulfilled') setAlerts(tasks[0].value);
+    if (tasks[0].status==='fulfilled'){setAlerts(tasks[0].value);setAlertsKnown(true);}else setAlertsKnown(false);
     if (tasks[1].status==='fulfilled') setReports(tasks[1].value);
     if (tasks[2].status==='fulfilled') setSystem(tasks[2].value);
     if (tasks[3].status==='fulfilled') setSources(tasks[3].value);
@@ -397,6 +401,7 @@ function AdminPortal({session,onLogout}) {
   useEffect(()=>{ loadLocations(); loadSideData(); }, [mode]);
   useEffect(()=>{ setAssessment(null); setAssessmentId(null); }, [selectedId, mode]);
 
+  const selectedRef=useRef(selected?.id);selectedRef.current=selected?.id;
   async function runAssessment() {
     if (!selected) return;
     setRefreshing(true); setError('');
@@ -404,6 +409,7 @@ function AdminPortal({session,onLogout}) {
       const out = mode==='live' && selected?.__browser_provider_payload
         ? await post(`/api/assessments/${selected.id}/browser-relay`, {provider:'OPEN_METEO', payload:selected.__browser_provider_payload, terrain:selected.__browser_terrain||null})
         : await post(`/api/assessments/${selected.id}?mode=${mode}&force=true`, selected.__browser_terrain?.elevations?{terrain_elevations:selected.__browser_terrain.elevations}:{});
+      if(selectedRef.current!==selected.id)return;
       setAssessment(out.assessment); setAssessmentId(out.assessment_id);
       await loadLocations(true); await loadSideData();
     } catch(e) { setError(e.message); }
@@ -445,7 +451,7 @@ function AdminPortal({session,onLogout}) {
       <main className="workspace">
         {error && <ErrorBox message={error} onRetry={()=>loadLocations(true)}/>} 
         {loading ? <Loading/> : <>
-          {view==='Flash Floods' && <FlashFloodPanel key={selectedId} selected={selected} onRefreshAlerts={loadSideData}/>}
+          {view==='Flash Floods' && <FlashFloodPanel key={selectedId} selected={selected} refreshToken={floodRefresh} alerts={alertsKnown?alerts:null} onOpenAlerts={()=>setView('Reports & Alerts')} onRefreshAlerts={loadSideData}/>}
           {view==='Overview' && <Overview location={activeAssessment} locations={locations} alerts={unresolved} reports={reports} assessmentId={assessmentId} onAssess={runAssessment} onNavigate={setView} refreshing={refreshing} mode={mode}/>} 
           {view==='Risk Map' && <RiskMapPage locations={locations} selected={selected} onSelect={loc=>setSelectedId(loc.id)} onAssess={runAssessment} assessment={activeAssessment}/>} 
           {view==='Reports & Alerts' && <ReportsAlerts reports={reports} alerts={alerts} selected={selected} locations={locations} auth={auth} onRefresh={loadSideData}/>} 

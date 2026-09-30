@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {freshness,draftEligible,historyCsv} from '../frontend/src/floodView.js';
+const now=20000;
+const a={basin:{context_status:'CONFIGURED'},level:'HIGH',status:'SCREENED',data_state:'CURRENT',valid_at_epoch:now,created_at:now};
+assert.equal(freshness(a,now),'Current');
+assert.equal(freshness({...a,valid_at_epoch:now-10801},now),'Stale');
+assert.equal(freshness({...a,valid_at_epoch:now+1},now),'Time unverified');
+assert.ok(draftEligible(a,1,now));
+assert.equal(draftEligible(a,1,now+901),false);
+assert.equal(draftEligible({...a,basin:{context_status:'AUTO_SCREENING'}},1,now),false);
+const csv=historyCsv([{id:1,assessment:{...a,location:'=1+1',source:'Provider, "quoted"',windows:[{hours:1,rainfall_mm:0}]}}]);
+assert.ok(csv.includes('"\'=1+1"'));assert.ok(csv.includes('"Provider, ""quoted"""'));assert.ok(csv.includes('"0"'));
+console.log('Flood freshness, draft expiry and CSV integrity passed');

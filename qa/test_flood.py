@@ -148,3 +148,32 @@ def test_current_provider_time_must_be_fresh(client):
 def test_nonconsecutive_hours_are_missing():
     assert main._complete_rain_window([1,2,3],[0,1,2],3,
         ['2026-09-29T10:00','2026-09-29T12:00','2026-09-29T13:00']) is None
+
+
+def test_missing_window_does_not_hide_other_windows(client):
+    p=packet();p['rain_forecast_1h_mm']=None
+    r=assess(p,configured(client),now=int(time.time()))
+    assert r['level']=='UNKNOWN'
+    assert r['windows'][0]['level']=='UNKNOWN'
+    assert r['windows'][1]['level']!='UNKNOWN'
+    assert r['windows'][2]['level']!='UNKNOWN'
+
+
+def test_draft_rechecks_provider_time_and_configuration(client,monkeypatch):
+    b=configured(client);monkeypatch.setattr(main,'fetch_live_weather',lambda x:packet())
+    r=client.post('/api/flood/assessments/1').json()
+    b['thresholds_mm']['1']=31
+    assert client.post('/api/flood/basins/1',json=b).status_code==200
+    assert client.post(f"/api/flood/records/{r['id']}/draft").status_code==409
+    r=client.post('/api/flood/assessments/1').json()
+    import json
+    con=main.db();a=r['assessment'];a['valid_at_epoch']=int(time.time())-10801
+    con.execute('UPDATE flood_assessments SET result_json=? WHERE id=?',(json.dumps(a),r['id']));con.commit();con.close()
+    assert client.post(f"/api/flood/records/{r['id']}/draft").status_code==409
+
+
+def test_flood_sms_preserves_hazard_and_reviewed_text():
+    message='Flash flood advisory: move away from the stream. '+('Additional reviewed instruction. '*12)
+    for language in ('en','hi','as'):
+        text=main._alert_broadcast_text({'advisory_type':'FLASH_FLOOD','location':'Mandi','message_en':message},language,sms=True)
+        assert message in text and 'landslide' not in text

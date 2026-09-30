@@ -150,8 +150,11 @@ def routes(db, locations, weather, localized_alert):
         require_role(role, 'OPERATOR'); result = record_get(assessment_id)
         if (result['data_state'] != 'CURRENT' or result['basin']['context_status'] != 'CONFIGURED'
                 or result['status'] != 'SCREENED' or result['level'] not in ('HIGH', 'CRITICAL')
-                or int(time.time()) - result['created_at'] > 900):
+                or not 0 <= int(time.time()) - result['created_at'] <= 900
+                or not 0 <= int(time.time()) - (result.get('valid_at_epoch') or 0) <= 10800):
             raise HTTPException(409, 'Draft requires a complete, current, high/critical live assessment under 15 minutes old with a configured catchment.')
+        if basin_for(result['location_id']) != result['basin']:
+            raise HTTPException(409,'Catchment changed. Record a new assessment.')
         names = ', '.join(v['name'] for v in result['basin']['villages'])
         message = (f"Flash flood screening advisory for {result['location']}: {result['level']}. "
                    f"Configured settlements: {names}. Review rainfall and stream observations; prepare local response. "
